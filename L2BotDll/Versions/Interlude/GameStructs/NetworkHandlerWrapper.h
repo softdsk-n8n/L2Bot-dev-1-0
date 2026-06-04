@@ -23,6 +23,8 @@ namespace Interlude
 		User* GetNextCreature(float_t radius, int prevId) const;
 		User* GetHero() const;
 		User* GetUser(int objectId) const;
+		// Teon: read our player's objectId from Engine.dll+0x81F530 (global my_player_id)
+		int GetMyObjectId() const;
 		Item* GetItem(int objectId) const;
 		int RequestItemList() const;
 		void MTL(APawn* self, L2::FVector dst, L2::FVector src, void* terrainInfo, int unk1) const;
@@ -34,10 +36,8 @@ namespace Interlude
 		void RequestRestartPoint(L2ParamStack& stack) const;
 	private:
 
-		static void __fastcall __Init_hook(NetworkHandler* This, int /*edx*/, float unk);
 		static int __fastcall __AddNetworkQueue_hook(NetworkHandler* This, int /*edx*/, L2::NetworkPacket* packet);
 
-		static void(__thiscall* __Init)(NetworkHandler*, float);
 		static Item* (__thiscall* __GetNextItem)(NetworkHandler*, float, int);
 		static User* (__thiscall* __GetNextCreature)(NetworkHandler*, float, int);
 		static int(__thiscall* __AddNetworkQueue)(NetworkHandler*, L2::NetworkPacket*);
@@ -54,9 +54,11 @@ namespace Interlude
 		//params objectId, unk
 		static void(__thiscall* __ChangeWaitType)(NetworkHandler*, int);
 		static void(__thiscall* __RequestRestartPoint)(NetworkHandler*, L2ParamStack&);
-
+		static void* (__thiscall* __GetNextObject)(NetworkHandler*, int, float, int);
+		static User* (__thiscall* __GetNextEnemy)(NetworkHandler*, float, int);
+		static User* (__thiscall* __GetNextNPC)(NetworkHandler*, float, int);
+		static User* (__thiscall* __GetNextFriend)(NetworkHandler*, float, int);
 	private:
-		static void* originalInitAddress;
 		static NetworkHandler* _target;
 	};
 }

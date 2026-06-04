@@ -2,6 +2,7 @@
 
 #include <map>
 #include <shared_mutex>
+#include <Windows.h>
 #include "../GameStructs/NetworkHandlerWrapper.h"
 #include "Domain/Repositories/EntityRepositoryInterface.h"
 #include "../Factories/NPCFactory.h"
@@ -19,7 +20,7 @@ namespace Interlude
 	public:
 		const std::unordered_map<std::uint32_t, std::shared_ptr<Entities::EntityInterface>> GetEntities() override
 		{
-			std::unique_lock<std::shared_timed_mutex>(m_Mutex);
+			std::unique_lock<std::shared_timed_mutex> lock(m_Mutex);
 
 			const auto allCreatures = FindAllObjects<User*>(m_Radius, [this](float_t radius, int32_t prevId) {
 				return m_NetworkHandler.GetNextCreature(radius, prevId);
@@ -28,22 +29,27 @@ namespace Interlude
 			std::unordered_map<std::uint32_t, std::shared_ptr<Entities::EntityInterface>> result;
 			for (const auto kvp : allCreatures) {
 				const auto creature = kvp.second;
-				if (creature->userType != L2::UserType::NPC) {
+				// Teon fix: use IsNPC() (checks first 5 int32s) instead of broken userType field
+				if (!creature->IsNPC() && !creature->IsMonster()) {
 					continue;
 				}
 
-				if (m_Npcs.find(creature->objectId) == m_Npcs.end()) {
-					m_Npcs[creature->objectId] = m_Factory.Create(creature);
-				}
-				else
-				{
-					m_Factory.Update(m_Npcs[creature->objectId], creature);
-				}
+				try {
+					if (m_Npcs.find(creature->objectId) == m_Npcs.end()) {
+						m_Npcs[creature->objectId] = m_Factory.Create(creature);
+					}
+					else
+					{
+						m_Factory.Update(m_Npcs[creature->objectId], creature);
+					}
 
-				const auto spoilState = m_Spoiled.find(creature->objectId) == m_Spoiled.end() ? Enums::SpoilStateEnum::none : m_Spoiled[creature->objectId];
-				m_Npcs[creature->objectId]->UpdateSpoilState(spoilState);
+					const auto spoilState = m_Spoiled.find(creature->objectId) == m_Spoiled.end() ? Enums::SpoilStateEnum::none : m_Spoiled[creature->objectId];
+					m_Npcs[creature->objectId]->UpdateSpoilState(spoilState);
 
-				result[creature->objectId] = m_Npcs[creature->objectId];
+					result[creature->objectId] = m_Npcs[creature->objectId];
+				} catch (...) {
+					// Skip creatures with invalid data (no pawn, unreadable memory)
+				}
 			}
 
 			return result;
@@ -51,7 +57,7 @@ namespace Interlude
 
 		void Reset() override
 		{
-			std::shared_lock<std::shared_timed_mutex>(m_Mutex);
+			std::shared_lock<std::shared_timed_mutex> lock(m_Mutex);
 			m_Npcs.clear();
 		}
 
@@ -77,17 +83,25 @@ namespace Interlude
 
 		void OnSpoiled(const Events::Event& evt)
 		{
-			std::shared_lock<std::shared_timed_mutex>(m_Mutex);
+			std::shared_lock<std::shared_timed_mutex> lock(m_Mutex);
 			if (evt.GetName() == Events::SpoiledEvent::name)
 			{
 				const auto casted = static_cast<const Events::SpoiledEvent&>(evt);
 				const auto hero = m_NetworkHandler.GetHero();
 				if (hero && hero->pawn && hero->pawn->lineagePlayerController)
 				{
-					const auto targetId = hero->pawn->lineagePlayerController->targetObjectId;
-					if (targetId)
+					MEMORY_BASIC_INFORMATION mbi;
+					auto pc = hero->pawn->lineagePlayerController;
+					if (VirtualQuery(pc, &mbi, sizeof(mbi)) && mbi.State == MEM_COMMIT &&
+						!(mbi.Protect & (PAGE_GUARD | PAGE_NOACCESS)) &&
+						(mbi.Protect & (PAGE_READONLY | PAGE_READWRITE | PAGE_EXECUTE_READ | PAGE_EXECUTE_READWRITE)) &&
+						(size_t)pc + sizeof(int32_t) <= (size_t)mbi.BaseAddress + mbi.RegionSize)
 					{
-						m_Spoiled[targetId] = Enums::SpoilStateEnum::spoiled;
+						const auto targetId = pc->targetObjectId;
+						if (targetId)
+						{
+							m_Spoiled[targetId] = Enums::SpoilStateEnum::spoiled;
+						}
 					}
 				}
 			}
@@ -95,7 +109,7 @@ namespace Interlude
 
 		void OnCreatureDied(const Events::Event& evt)
 		{
-			std::shared_lock<std::shared_timed_mutex>(m_Mutex);
+			std::shared_lock<std::shared_timed_mutex> lock(m_Mutex);
 			if (evt.GetName() == Events::CreatureDiedEvent::name)
 			{
 				const auto casted = static_cast<const Events::CreatureDiedEvent&>(evt);
@@ -122,7 +136,7 @@ namespace Interlude
 		std::map<uint32_t, Enums::SpoilStateEnum> m_Spoiled;
 		const NetworkHandlerWrapper& m_NetworkHandler;
 		const uint16_t m_Radius = 0;
-		std::shared_timed_mutex m_Mutex;
+		mutable std::shared_timed_mutex m_Mutex;
 		std::unordered_map<uint32_t, std::shared_ptr<Entities::NPC>> m_Npcs;
 	};
 }

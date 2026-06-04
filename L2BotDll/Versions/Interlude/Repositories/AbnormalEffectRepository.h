@@ -19,7 +19,7 @@ namespace Interlude
 	public:
 		const std::unordered_map<std::uint32_t, std::shared_ptr<Entities::EntityInterface>> GetEntities() override
 		{
-			std::unique_lock<std::shared_timed_mutex>(m_Mutex);
+			std::unique_lock<std::shared_timed_mutex> lock(m_Mutex);
 
 			return m_Effects;
 		}
@@ -44,13 +44,13 @@ namespace Interlude
 
 		void Reset() override
 		{
-			std::shared_lock<std::shared_timed_mutex>(m_Mutex);
+			std::shared_lock<std::shared_timed_mutex> lock(m_Mutex);
 			m_Effects.clear();
 		}
 
 		void OnHeroDeleted(const Events::Event& evt)
 		{
-			std::shared_lock<std::shared_timed_mutex>(m_Mutex);
+			std::shared_lock<std::shared_timed_mutex> lock(m_Mutex);
 			if (evt.GetName() == Events::HeroDeletedEvent::name)
 			{
 				Reset();
@@ -59,7 +59,7 @@ namespace Interlude
 
 		void OnEffectToggled(const Events::Event& evt)
 		{
-			std::shared_lock<std::shared_timed_mutex>(m_Mutex);
+			std::shared_lock<std::shared_timed_mutex> lock(m_Mutex);
 			if (evt.GetName() == Events::AbnormalEffectChangedEvent::name)
 			{
 				const auto casted = static_cast<const Events::AbnormalEffectChangedEvent&>(evt);
@@ -105,6 +105,6 @@ namespace Interlude
 	private:
 		const AbnormalEffectFactory& m_Factory;
 		std::unordered_map<uint32_t, std::shared_ptr<Entities::EntityInterface>> m_Effects;
-		std::shared_timed_mutex m_Mutex;
+		mutable std::shared_timed_mutex m_Mutex;
 	};
 }

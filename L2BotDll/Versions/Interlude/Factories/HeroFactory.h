@@ -28,6 +28,23 @@ namespace Interlude
 			bool isStanding;
 		};
 
+		// Check if a pointer points to readable memory
+		static bool IsReadable(const void* ptr, size_t size = 4)
+		{
+			if (!ptr) return false;
+			MEMORY_BASIC_INFORMATION mbi;
+			if (VirtualQuery(ptr, &mbi, sizeof(mbi)) == 0) return false;
+			if (mbi.State != MEM_COMMIT) return false;
+			if (mbi.Protect & (PAGE_GUARD | PAGE_NOACCESS)) return false;
+			if (!(mbi.Protect & (PAGE_READONLY | PAGE_READWRITE | PAGE_EXECUTE_READ | PAGE_EXECUTE_READWRITE))) return false;
+			// Check the full range
+			if ((size_t)ptr + size > (size_t)mbi.BaseAddress + mbi.RegionSize) {
+				// Need to check next region too - for simplicity just check the first page
+				return false;
+			}
+			return true;
+		}
+
 	public:
 		HeroFactory() = default;
 		virtual ~HeroFactory() = default;
@@ -77,9 +94,15 @@ namespace Interlude
 			if (!item->pawn) {
 				throw RuntimeException(std::format(L"pawn is empty for hero {}", item->nickname));
 			}
+			if (!IsReadable(item->pawn, 0x824)) {
+				throw RuntimeException(L"pawn memory not readable for hero");
+			}
 			const auto playerController = item->pawn->lineagePlayerController;
 			if (!playerController) {
 				throw RuntimeException(std::format(L"player controller is empty for hero {}", item->nickname));
+			}
+			if (!IsReadable(playerController, sizeof(ALineagePlayerController))) {
+				throw RuntimeException(L"playerController memory not readable for hero");
 			}
 
 			return {

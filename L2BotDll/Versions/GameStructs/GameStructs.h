@@ -10,6 +10,13 @@ namespace L2
 		USER = 0
 	};
 
+	enum class ItemType : int32_t
+	{
+		ITEM = 0,
+		WEAPON = 1,
+		ARMOR = 2
+	};
+
 	enum class Race : int32_t
 	{
 		DARK_ELF = 2,

@@ -17,22 +17,56 @@ namespace Interlude
 	class HeroRepository : public Repositories::EntityRepositoryInterface
 	{
 	public:
+		HeroRepository(NetworkHandlerWrapper& networkHandler, HeroFactory& factory) :
+			m_NetworkHandler(networkHandler),
+			m_Factory(factory)
+		{
+		}
+		HeroRepository() = delete;
+		virtual ~HeroRepository() = default;
+
+	public:
 		const std::unordered_map<std::uint32_t, std::shared_ptr<Entities::EntityInterface>> GetEntities() override
 		{
-			std::unique_lock<std::shared_timed_mutex>(m_Mutex);
+			std::unique_lock<std::shared_timed_mutex> lock(m_Mutex);
 
 			const auto hero = m_NetworkHandler.GetHero();
+
+			static int tickCounter = 0;
+			++tickCounter;
 
 			std::unordered_map<std::uint32_t, std::shared_ptr<Entities::EntityInterface>> result;
 			if (hero) {
 				if (!m_Hero) {
-					m_Hero = m_Factory.Create(hero);
-					Services::ServiceLocator::GetInstance().GetEventDispatcher()->Dispatch(Events::HeroCreatedEvent{});
-					Services::ServiceLocator::GetInstance().GetLogger()->App(L"{} enter in the world", m_Hero->GetFullName().GetNickname());
+					try {
+						m_Hero = m_Factory.Create(hero);
+						if (m_Hero) {
+							Services::ServiceLocator::GetInstance().GetEventDispatcher()->Dispatch(Events::HeroCreatedEvent{});
+							Services::ServiceLocator::GetInstance().GetLogger()->App(L"%s enter in the world", m_Hero->GetFullName().GetNickname().c_str());
+						}
+					} catch (const RuntimeException&) {
+						m_Hero = nullptr;
+					} catch (const std::exception&) {
+						m_Hero = nullptr;
+					} catch (...) {
+						m_Hero = nullptr;
+					}
 				}
 				else
 				{
-					m_Factory.Update(m_Hero, hero);
+					try {
+						m_Factory.Update(m_Hero, hero);
+					} catch (const RuntimeException&) {
+						m_Hero = nullptr;
+						return result;
+					} catch (const std::exception&) {
+						m_Hero = nullptr;
+						return result;
+					} catch (...) {
+						Services::ServiceLocator::GetInstance().GetLogger()->Info(L"HeroFactory Update failed");
+						m_Hero = nullptr;
+						return result;
+					}
 					const auto attackers = std::map<uint32_t, uint32_t>(m_Hero->GetAttackerIds());
 					for (const auto kvp : attackers)
 					{
@@ -47,7 +81,7 @@ namespace Interlude
 				result[hero->objectId] = m_Hero;
 			}
 			else if (m_Hero) {
-				Services::ServiceLocator::GetInstance().GetLogger()->App(L"{} leave the world", m_Hero->GetFullName().GetNickname());
+				Services::ServiceLocator::GetInstance().GetLogger()->App(L"%s leave the world", m_Hero->GetFullName().GetNickname().c_str());
 				m_Hero = nullptr;
 				Services::ServiceLocator::GetInstance().GetEventDispatcher()->Dispatch(Events::HeroDeletedEvent{});
 			}
@@ -57,7 +91,7 @@ namespace Interlude
 
 		void Reset() override
 		{
-			std::shared_lock<std::shared_timed_mutex>(m_Mutex);
+			std::unique_lock<std::shared_timed_mutex> lock(m_Mutex);
 			m_Hero = nullptr;
 		}
 
@@ -73,7 +107,7 @@ namespace Interlude
 
 		void OnCreatureDied(const Events::Event& evt)
 		{
-			std::shared_lock<std::shared_timed_mutex>(m_Mutex);
+			std::shared_lock<std::shared_timed_mutex> lock(m_Mutex);
 			if (evt.GetName() == Events::CreatureDiedEvent::name)
 			{
 				const auto casted = static_cast<const Events::CreatureDiedEvent&>(evt);
@@ -81,7 +115,7 @@ namespace Interlude
 				{
 					if (m_Hero->GetId() == casted.GetCreatureId())
 					{
-						Services::ServiceLocator::GetInstance().GetLogger()->App(L"{} died", m_Hero->GetFullName().GetNickname());
+						Services::ServiceLocator::GetInstance().GetLogger()->App(L"%s died", m_Hero->GetFullName().GetNickname().c_str());
 						m_Hero->ClearAttackers();
 					}
 					else
@@ -95,42 +129,28 @@ namespace Interlude
 
 		void OnAttacked(const Events::Event& evt)
 		{
-			std::shared_lock<std::shared_timed_mutex>(m_Mutex);
+			std::shared_lock<std::shared_timed_mutex> lock(m_Mutex);
 			if (evt.GetName() == Events::AttackedEvent::name)
 			{
 				const auto casted = static_cast<const Events::AttackedEvent&>(evt);
-				if (m_Hero && m_Hero->GetId() != casted.GetAttackerId())
+				if (m_Hero)
 				{
-					if (m_Hero->GetId() == casted.GetTargetId())
+					if (casted.GetAttackerId() == m_Hero->GetId())
 					{
-						const auto attacker = m_NetworkHandler.GetUser(casted.GetAttackerId());
-						if (attacker && attacker->userType == L2::UserType::NPC)
-						{
-							m_Hero->AddAttacker(casted.GetAttackerId());
-						}
+						// hero is attacked
 					}
-					else if (casted.GetAttackerId() != casted.GetTargetId())
+					else if (casted.GetTargetId() == m_Hero->GetId())
 					{
-						// try to remove creature that is attacking another target from the attackers
-						m_Hero->RemoveAttacker(casted.GetAttackerId());
+						m_Hero->AddAttacker(casted.GetAttackerId());
 					}
 				}
 			}
 		}
 
-		HeroRepository(const NetworkHandlerWrapper& networkHandler, const HeroFactory& factory) :
-			m_NetworkHandler(networkHandler),
-			m_Factory(factory)
-		{
-
-		}
-
-		HeroRepository() = delete;
-		virtual ~HeroRepository() = default;
-
 	private:
-		const HeroFactory& m_Factory;
-		const NetworkHandlerWrapper& m_NetworkHandler;
+		NetworkHandlerWrapper& m_NetworkHandler;
+		HeroFactory m_Factory;
 		std::shared_ptr<Entities::Hero> m_Hero;
+		std::shared_timed_mutex m_Mutex;
 	};
 }

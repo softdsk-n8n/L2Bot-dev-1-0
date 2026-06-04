@@ -21,20 +21,26 @@ namespace Interlude
 			std::unordered_map<std::uint32_t, std::shared_ptr<Entities::EntityInterface>> result;
 			for (const auto& kvp : allCreatures)
 			{
-				const auto &creature = kvp.second;
-				if (creature->userType != L2::UserType::USER || creature->lvl != 0) {
+				const auto& creature = kvp.second;
+				// Teon fix: use IsPlayer() instead of broken userType/lvl check
+				// (lvl at 0x58 is always 0 in Teon — old check excluded all players)
+				if (!creature->IsPlayer()) {
 					continue;
 				}
 
-				if (m_Players.find(creature->objectId) == m_Players.end()) {
-					m_Players[creature->objectId] = m_Factory.Create(creature);
-				}
-				else
-				{
-					m_Factory.Update(m_Players[creature->objectId], creature);
-				}
+				try {
+					if (m_Players.find(creature->objectId) == m_Players.end()) {
+						m_Players[creature->objectId] = m_Factory.Create(creature);
+					}
+					else
+					{
+						m_Factory.Update(m_Players[creature->objectId], creature);
+					}
 
-				result[creature->objectId] = m_Players[creature->objectId];
+					result[creature->objectId] = m_Players[creature->objectId];
+				} catch (...) {
+					// Skip players with invalid data (no pawn, unreadable memory)
+				}
 			}
 
 			return result;
@@ -42,7 +48,6 @@ namespace Interlude
 
 		void Reset() override
 		{
-			std::shared_lock<std::shared_timed_mutex>(m_Mutex);
 			m_Players.clear();
 		}
 

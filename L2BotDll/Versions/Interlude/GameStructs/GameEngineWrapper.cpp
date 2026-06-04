@@ -25,6 +25,72 @@ using namespace L2Bot::Domain;
 
 namespace Interlude
 {
+	// Standalone SEH wrapper: dispatch a single event safely.
+	// Must be a C-style function (no C++ destructors) to allow __try.
+	static void DispatchOneSafe(L2Bot::Domain::Events::EventDispatcher& dispatcher, const L2Bot::Domain::Events::Event& evt)
+	{
+		__try {
+			dispatcher.DispatchOne(evt);
+		} __except (EXCEPTION_EXECUTE_HANDLER) {
+			// Skip this event - one bad handler won't kill the whole frame
+		}
+	}
+
+	static void DispatchQueuedSafe()
+	{
+		auto& dispatcher = *Services::ServiceLocator::GetInstance().GetEventDispatcher();
+		// Drain queue first (moves it out of the dispatcher), then dispatch each event
+		// with per-event SEH so one crash doesn't skip the entire frame
+		auto queue = dispatcher.DrainQueue();
+		for (size_t i = 0; i < queue.size(); i++)
+		{
+			if (queue[i]) {
+				DispatchOneSafe(dispatcher, *queue[i]);
+			}
+		}
+	}
+
+	bool IsPawnValid(APawn* pawn)
+	{
+		__try {
+			float testX = pawn->Location.x;
+			// Game coordinates are typically -300000 to 300000
+			if (testX < -1000000.0f || testX > 1000000.0f || testX == 0.0f) {
+				return false;
+			}
+			return true;
+		} __except (EXCEPTION_EXECUTE_HANDLER) {
+			return false; // Access violation - pawn pointer is garbage
+		}
+	}
+
+	bool ValidateAndReadPawnData(APawn* pawn, ALineagePlayerController*& outController, uint32_t& outTargetId, bool& outIsStanding)
+	{
+		__try {
+			// Validate pawn Location
+			float testX = pawn->Location.x;
+			if (testX < -1000000.0f || testX > 1000000.0f || testX == 0.0f) {
+				return false;
+			}
+			// Try to read playerController
+			outController = pawn->lineagePlayerController;
+			if (outController) {
+				outTargetId = outController->targetObjectId == -1 ? 0 : (uint32_t)outController->targetObjectId;
+				outIsStanding = outController->isStanding == 1;
+			} else {
+				outTargetId = 0;
+				outIsStanding = true;
+			}
+			return true;
+		} __except (EXCEPTION_EXECUTE_HANDLER) {
+			// pawn access or playerController access caused violation
+			outController = nullptr;
+			outTargetId = 0;
+			outIsStanding = true;
+			return false;
+		}
+	}
+
 	GameEngineWrapper::GameEngine* GameEngineWrapper::_target = 0;
 
 	void(__thiscall* GameEngineWrapper::__OnSkillListPacket)(GameEngine*, L2ParamStack&) = 0;
@@ -34,7 +100,6 @@ namespace Interlude
 	void(__thiscall* GameEngineWrapper::__AddInventoryItem)(GameEngine*, ItemInfo&) = 0;
 	void(__thiscall* GameEngineWrapper::__OnReceiveUpdateItemList)(GameEngine*, UpdateItemListActionType, ItemInfo&) = 0;
 	void(__thiscall* GameEngineWrapper::__OnExAutoSoulShot)(GameEngine*, L2ParamStack&) = 0;
-	void(__thiscall* GameEngineWrapper::__Tick)(GameEngine*, float_t) = 0;
 	void(__thiscall* GameEngineWrapper::__OnSay2)(GameEngine*, L2ParamStack&) = 0;
 	void(__thiscall* GameEngineWrapper::__OnEndItemList)(GameEngine*) = 0;
 	float(__thiscall* GameEngineWrapper::__GetMaxTickRate)(GameEngine*) = 0;
@@ -44,78 +109,79 @@ namespace Interlude
 
 	void GameEngineWrapper::Init(HMODULE hModule)
 	{
-		(FARPROC&)__Tick = (FARPROC)splice(
-			GetProcAddress(hModule, "?Tick@UGameEngine@@UAEXM@Z"), __Tick_hook
-		);
-		(FARPROC&)__OnSkillListPacket = (FARPROC)splice(
-			GetProcAddress(hModule, "?OnSkillListPacket@UGameEngine@@UAEXAAVL2ParamStack@@@Z"), __OnSkillListPacket_hook
-		);
-		(FARPROC&)__OnReceiveMagicSkillUse = (FARPROC)splice(
-			GetProcAddress(hModule, "?OnReceiveMagicSkillUse@UGameEngine@@UAEXPAUUser@@0AAVL2ParamStack@@@Z"), __OnReceiveMagicSkillUse_hook
-		);
-		(FARPROC&)__OnReceiveMagicSkillCanceled = (FARPROC)splice(
-			GetProcAddress(hModule, "?OnReceiveMagicSkillCanceled@UGameEngine@@UAEXPAUUser@@@Z"), __OnReceiveMagicSkillCanceled_hook
-		);
-		(FARPROC&)__AddAbnormalStatus = (FARPROC)splice(
-			GetProcAddress(hModule, "?AddAbnormalStatus@UGameEngine@@UAEXAAVL2ParamStack@@@Z"), __AddAbnormalStatus_hook
-		);
-		(FARPROC&)__AddInventoryItem = (FARPROC)splice(
-			GetProcAddress(hModule, "?AddInventoryItem@UGameEngine@@UAEXAAUItemInfo@@@Z"), __AddInventoryItem_hook
-		);
-		(FARPROC&)__OnReceiveUpdateItemList = (FARPROC)splice(
-			GetProcAddress(hModule, "?OnReceiveUpdateItemList@UGameEngine@@UAEXHAAUItemInfo@@@Z"), __OnReceiveUpdateItemList_hook
-		);
-		(FARPROC&)__OnExAutoSoulShot = (FARPROC)splice(
-			GetProcAddress(hModule, "?OnExAutoSoulShot@UGameEngine@@UAEXAAVL2ParamStack@@@Z"), __OnExAutoSoulShot_hook
-		);
-		(FARPROC&)__OnSay2 = (FARPROC)splice(
-			GetProcAddress(hModule, "?OnSay2@UGameEngine@@UAEXAAVL2ParamStack@@@Z"), __OnSay2_hook
-		);
-		(FARPROC&)__OnEndItemList = (FARPROC)splice(
-			GetProcAddress(hModule, "?OnEndItemList@UGameEngine@@UAEXXZ"), __OnEndItemList_hook
-		);
-		(FARPROC&)__GetMaxTickRate = (FARPROC)splice(
-			GetProcAddress(hModule, "?GetMaxTickRate@UGameEngine@@UAEMXZ"), __GetMaxTickRate_hook
-		);
-		(FARPROC&)__OnDie = (FARPROC)splice(
-			GetProcAddress(hModule, "?OnDie@UGameEngine@@UAEHPAUUser@@AAVL2ParamStack@@@Z"), __OnDie_hook
-		);
-		(FARPROC&)__OnAttack = (FARPROC)splice(
-			GetProcAddress(hModule, "?OnAttack@UGameEngine@@UAEHPAUUser@@0HHHHHVFVector@@H@Z"), __OnAttack_hook
-		);
+		FARPROC proc = nullptr;
 
-		Services::ServiceLocator::GetInstance().GetLogger()->Info(L"UGameEngine hooks initialized");
+		proc = GetProcAddress(hModule, "?OnSkillListPacket@UGameEngine@@UAEXAAVL2ParamStack@@@Z");
+		if (proc) { (FARPROC&)__OnSkillListPacket = (FARPROC)splice(proc, __OnSkillListPacket_hook); }
+		else { Services::ServiceLocator::GetInstance().GetLogger()->Info(L"OnSkillListPacket NOT FOUND in exports"); }
+
+		proc = GetProcAddress(hModule, "?OnReceiveMagicSkillUse@UGameEngine@@UAEXPAUUser@@0AAVL2ParamStack@@@Z");
+		if (proc) { (FARPROC&)__OnReceiveMagicSkillUse = (FARPROC)splice(proc, __OnReceiveMagicSkillUse_hook); }
+
+		proc = GetProcAddress(hModule, "?OnReceiveMagicSkillCanceled@UGameEngine@@UAEXPAUUser@@@Z");
+		if (proc) { (FARPROC&)__OnReceiveMagicSkillCanceled = (FARPROC)splice(proc, __OnReceiveMagicSkillCanceled_hook); }
+
+		proc = GetProcAddress(hModule, "?AddAbnormalStatus@UGameEngine@@UAEXAAVL2ParamStack@@@Z");
+		if (proc) { (FARPROC&)__AddAbnormalStatus = (FARPROC)splice(proc, __AddAbnormalStatus_hook); }
+
+		proc = GetProcAddress(hModule, "?AddInventoryItem@UGameEngine@@UAEXAAUItemInfo@@@Z");
+		if (proc) { (FARPROC&)__AddInventoryItem = (FARPROC)splice(proc, __AddInventoryItem_hook); }
+
+		proc = GetProcAddress(hModule, "?OnReceiveUpdateItemList@UGameEngine@@UAEXHAAUItemInfo@@@Z");
+		if (proc) { (FARPROC&)__OnReceiveUpdateItemList = (FARPROC)splice(proc, __OnReceiveUpdateItemList_hook); }
+
+		proc = GetProcAddress(hModule, "?OnExAutoSoulShot@UGameEngine@@UAEXAAVL2ParamStack@@@Z");
+		if (proc) { (FARPROC&)__OnExAutoSoulShot = (FARPROC)splice(proc, __OnExAutoSoulShot_hook); }
+
+		proc = GetProcAddress(hModule, "?OnSay2@UGameEngine@@UAEXAAVL2ParamStack@@@Z");
+		if (proc) { (FARPROC&)__OnSay2 = (FARPROC)splice(proc, __OnSay2_hook); }
+
+		proc = GetProcAddress(hModule, "?OnEndItemList@UGameEngine@@UAEXXZ");
+		if (proc) { (FARPROC&)__OnEndItemList = (FARPROC)splice(proc, __OnEndItemList_hook); }
+		else { Services::ServiceLocator::GetInstance().GetLogger()->Info(L"OnEndItemList NOT FOUND in exports"); }
+
+		proc = GetProcAddress(hModule, "?GetMaxTickRate@UGameEngine@@UAEMXZ");
+		if (proc) { (FARPROC&)__GetMaxTickRate = (FARPROC)splice(proc, __GetMaxTickRate_hook); }
+
+		proc = GetProcAddress(hModule, "?OnDie@UGameEngine@@UAEHPAUUser@@AAVL2ParamStack@@@Z");
+		if (proc) { (FARPROC&)__OnDie = (FARPROC)splice(proc, __OnDie_hook); }
+		else { Services::ServiceLocator::GetInstance().GetLogger()->Info(L"OnDie NOT FOUND in exports"); }
+
+		proc = GetProcAddress(hModule, "?OnAttack@UGameEngine@@UAEHPAUUser@@0HHHHHVFVector@@H@Z");
+		if (proc) { (FARPROC&)__OnAttack = (FARPROC)splice(proc, __OnAttack_hook); }
+		else { Services::ServiceLocator::GetInstance().GetLogger()->Info(L"OnAttack NOT FOUND in exports"); }
+
+		Services::ServiceLocator::GetInstance().GetLogger()->Info(L"UGameEngine hooks initialized (deferred dispatch)");
 	}
 
 	void GameEngineWrapper::Restore()
 	{
-		restore((void*&)__OnSkillListPacket);
-		restore((void*&)__OnReceiveMagicSkillUse);
-		restore((void*&)__OnReceiveMagicSkillCanceled);
-		restore((void*&)__AddAbnormalStatus);
-		restore((void*&)__AddInventoryItem);
-		restore((void*&)__OnReceiveUpdateItemList);
-		restore((void*&)__OnExAutoSoulShot);
-		restore((void*&)__OnSay2);
-		restore((void*&)__OnEndItemList);
-		restore((void*&)__GetMaxTickRate);
-		restore((void*&)__OnDie);
-		restore((void*&)__Tick);
-		restore((void*&)__OnAttack);
+		if (__OnSkillListPacket) restore((void*&)__OnSkillListPacket);
+		if (__OnReceiveMagicSkillUse) restore((void*&)__OnReceiveMagicSkillUse);
+		if (__OnReceiveMagicSkillCanceled) restore((void*&)__OnReceiveMagicSkillCanceled);
+		if (__AddAbnormalStatus) restore((void*&)__AddAbnormalStatus);
+		if (__AddInventoryItem) restore((void*&)__AddInventoryItem);
+		if (__OnReceiveUpdateItemList) restore((void*&)__OnReceiveUpdateItemList);
+		if (__OnExAutoSoulShot) restore((void*&)__OnExAutoSoulShot);
+		if (__OnSay2) restore((void*&)__OnSay2);
+		if (__OnEndItemList) restore((void*&)__OnEndItemList);
+		if (__GetMaxTickRate) restore((void*&)__GetMaxTickRate);
+		if (__OnDie) restore((void*&)__OnDie);
+		if (__OnAttack) restore((void*&)__OnAttack);
 		Services::ServiceLocator::GetInstance().GetLogger()->Info(L"UGameEngine hooks restored");
 	}
 
 	void __fastcall GameEngineWrapper::__OnSkillListPacket_hook(GameEngine* This, uint32_t, L2ParamStack& stack)
 	{
-		Services::ServiceLocator::GetInstance().GetEventDispatcher()->Dispatch(Events::SkillCreatedEvent{stack.GetBufferAsVector<int32_t>()});
+		Services::ServiceLocator::GetInstance().GetEventDispatcher()->Enqueue(Events::SkillCreatedEvent{stack.GetBufferAsVector<int32_t>()});
 		(*__OnSkillListPacket)(This, stack);
 	}
 
 	int __fastcall GameEngineWrapper::__OnReceiveMagicSkillUse_hook(GameEngine* This, uint32_t, User* attacker, User* target, L2ParamStack& stack)
 	{
-		Services::ServiceLocator::GetInstance().GetEventDispatcher()->Dispatch(Events::SkillUsedEvent{ stack.GetBufferAsVector<int32_t>() });
+		Services::ServiceLocator::GetInstance().GetEventDispatcher()->Enqueue(Events::SkillUsedEvent{ stack.GetBufferAsVector<int32_t>() });
 		if (attacker && target) {
-			Services::ServiceLocator::GetInstance().GetEventDispatcher()->Dispatch(Events::AttackedEvent{ attacker->objectId, target->objectId });
+			Services::ServiceLocator::GetInstance().GetEventDispatcher()->Enqueue(Events::AttackedEvent{ attacker->objectId, target->objectId });
 		}
 		return (*__OnReceiveMagicSkillUse)(This, attacker, target, stack);
 	}
@@ -123,20 +189,20 @@ namespace Interlude
 	void __fastcall GameEngineWrapper::__OnReceiveMagicSkillCanceled_hook(GameEngine* This, uint32_t, User* user)
 	{
 		if (user) {
-			Services::ServiceLocator::GetInstance().GetEventDispatcher()->Dispatch(Events::SkillCancelledEvent{ user->objectId });
+			Services::ServiceLocator::GetInstance().GetEventDispatcher()->Enqueue(Events::SkillCancelledEvent{ user->objectId });
 		}
 		(*__OnReceiveMagicSkillCanceled)(This, user);
 	}
 
 	void __fastcall GameEngineWrapper::__AddAbnormalStatus_hook(GameEngine* This, uint32_t, L2ParamStack& stack)
 	{
-		Services::ServiceLocator::GetInstance().GetEventDispatcher()->Dispatch(Events::AbnormalEffectChangedEvent{ stack.GetBufferAsVector<int32_t>(3) });
+		Services::ServiceLocator::GetInstance().GetEventDispatcher()->Enqueue(Events::AbnormalEffectChangedEvent{ stack.GetBufferAsVector<int32_t>(3) });
 		(*__AddAbnormalStatus)(This, stack);
 	}
 
 	void __fastcall GameEngineWrapper::__AddInventoryItem_hook(GameEngine* This, uint32_t, ItemInfo& itemInfo)
 	{
-		Services::ServiceLocator::GetInstance().GetEventDispatcher()->Dispatch(
+		Services::ServiceLocator::GetInstance().GetEventDispatcher()->Enqueue(
 			Events::ItemCreatedEvent
 			{
 				DTO::ItemData
@@ -172,13 +238,13 @@ namespace Interlude
 		switch (actionType)
 		{
 		case UpdateItemListActionType::created:
-			Services::ServiceLocator::GetInstance().GetEventDispatcher()->Dispatch(Events::ItemCreatedEvent{ itemData });
+			Services::ServiceLocator::GetInstance().GetEventDispatcher()->Enqueue(Events::ItemCreatedEvent{ itemData });
 			break;
 		case UpdateItemListActionType::updated:
-			Services::ServiceLocator::GetInstance().GetEventDispatcher()->Dispatch(Events::ItemUpdatedEvent{ itemData });
+			Services::ServiceLocator::GetInstance().GetEventDispatcher()->Enqueue(Events::ItemUpdatedEvent{ itemData });
 			break;
 		case UpdateItemListActionType::deleted:
-			Services::ServiceLocator::GetInstance().GetEventDispatcher()->Dispatch(Events::ItemDeletedEvent{ itemInfo.objectId });
+			Services::ServiceLocator::GetInstance().GetEventDispatcher()->Enqueue(Events::ItemDeletedEvent{ itemInfo.objectId });
 			break;
 		}
 		(*__OnReceiveUpdateItemList)(This, actionType, itemInfo);
@@ -186,27 +252,15 @@ namespace Interlude
 
 	void __fastcall GameEngineWrapper::__OnExAutoSoulShot_hook(GameEngine* This, uint32_t, L2ParamStack& stack)
 	{
-		Services::ServiceLocator::GetInstance().GetEventDispatcher()->Dispatch(Events::ItemAutousedEvent{ stack.GetBufferAsVector<uint32_t>() });
+		Services::ServiceLocator::GetInstance().GetEventDispatcher()->Enqueue(Events::ItemAutousedEvent{ stack.GetBufferAsVector<uint32_t>() });
 		(*__OnExAutoSoulShot)(This, stack);
 	}
 
-	void __fastcall GameEngineWrapper::__Tick_hook(GameEngine* This, uint32_t, float_t deltaTime)
-	{
-		if (_target == 0)
-		{
-			_target = This;
-			Services::ServiceLocator::GetInstance().GetLogger()->Info(L"UGameEngine pointer {:#010x} obtained", (int)_target);
-		}
-
-		(*__Tick)(This, deltaTime);
-
-		Services::ServiceLocator::GetInstance().GetEventDispatcher()->Dispatch(Events::GameEngineTickedEvent{});
-	}
 	void __fastcall GameEngineWrapper::__OnSay2_hook(GameEngine* This, uint32_t, L2ParamStack& stack)
 	{
 		const auto buffer = stack.GetBufferAsVector<uint32_t>();
 
-		Services::ServiceLocator::GetInstance().GetEventDispatcher()->Dispatch(
+		Services::ServiceLocator::GetInstance().GetEventDispatcher()->Enqueue(
 			Events::ChatMessageCreatedEvent
 			{
 				DTO::ChatMessageData
@@ -221,32 +275,65 @@ namespace Interlude
 
 		(*__OnSay2)(This, stack);
 	}
+
 	void __fastcall GameEngineWrapper::__OnEndItemList_hook(GameEngine* This, uint32_t)
 	{
-		Services::ServiceLocator::GetInstance().GetEventDispatcher()->Dispatch(Events::OnEndItemListEvent());
+		Services::ServiceLocator::GetInstance().GetEventDispatcher()->Enqueue(Events::OnEndItemListEvent());
 		(*__OnEndItemList)(This);
 	}
-	// TODO ini
+
 	float __fastcall GameEngineWrapper::__GetMaxTickRate_hook(GameEngine* This, int)
 	{
+		if (_target == 0)
+		{
+			_target = This;
+			Services::ServiceLocator::GetInstance().GetLogger()->Info(L"UGameEngine pointer 0x%08X obtained", (int)_target);
+		}
+
+		// Call original and return real FPS. Returning 0.0f caused division-by-zero in UE2.
 		float fps = (*__GetMaxTickRate)(This);
-		return 0.0f;
+
+		// SAFE POINT: GetMaxTickRate is called at the end of UGameEngine::Tick,
+		// AFTER all packet processing is complete. Drain the deferred event queue here.
+		DispatchQueuedSafe();
+
+		// Enqueue the tick event too — it will be dispatched next frame
+		Services::ServiceLocator::GetInstance().GetEventDispatcher()->Enqueue(Events::GameEngineTickedEvent{});
+
+		return fps;
+	}
+
+	// Standalone SEH helper for OnDie/OnAttack — __try cannot coexist with C++ objects needing destructors
+	// Read objectId from a potentially invalid User pointer
+	static uint32_t ReadObjectIdSafe(User* user)
+	{
+		__try {
+			return user ? user->objectId : 0;
+		} __except (EXCEPTION_EXECUTE_HANDLER) {
+			return 0;
+		}
 	}
 
 	int __fastcall GameEngineWrapper::__OnDie_hook(GameEngine* This, int, User* creature, L2ParamStack& stack)
 	{
-		if (creature) {
-			Services::ServiceLocator::GetInstance().GetEventDispatcher()->Dispatch(Events::CreatureDiedEvent{ creature->objectId, stack.GetBufferAsVector<int32_t>() });
+		uint32_t objectId = ReadObjectIdSafe(creature);
+		if (objectId != 0) {
+			// NOTE: Do NOT read stack.GetBufferAsVector() — L2ParamStack is consumed/freed by
+			// the original OnDie. Reading it before or after the call causes GPF.
+			// Pass empty vector to CreatureDiedEvent.
+			Services::ServiceLocator::GetInstance().GetEventDispatcher()->Enqueue(Events::CreatureDiedEvent{ objectId, {} });
 		}
-
 		return (*__OnDie)(This, creature, stack);
 	}
 
 	int __fastcall GameEngineWrapper::__OnAttack_hook(GameEngine* This, int, User* attacker, User* target, int unk0, int unk1, int unk2, int unk3, int unk4, L2::FVector unk5, int unk6)
 	{
-		if (attacker && target) {
-			Services::ServiceLocator::GetInstance().GetEventDispatcher()->Dispatch(Events::AttackedEvent{ attacker->objectId, target->objectId });
+		uint32_t attackerId = ReadObjectIdSafe(attacker);
+		uint32_t targetId = ReadObjectIdSafe(target);
+		if (attackerId != 0 && targetId != 0) {
+			Services::ServiceLocator::GetInstance().GetEventDispatcher()->Enqueue(Events::AttackedEvent{ attackerId, targetId });
 		}
+
 		return (*__OnAttack)(This, attacker, target, unk0, unk1, unk2, unk3, unk4, unk5, unk6);
 	}
 }

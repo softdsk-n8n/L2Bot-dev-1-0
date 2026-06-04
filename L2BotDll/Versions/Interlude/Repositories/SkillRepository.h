@@ -24,7 +24,7 @@ namespace Interlude
 	public:
 		const std::unordered_map<std::uint32_t, std::shared_ptr<Entities::EntityInterface>> GetEntities() override
 		{
-			std::unique_lock<std::shared_timed_mutex>(m_Mutex);
+			std::unique_lock<std::shared_timed_mutex> lock(m_Mutex);
 
 			std::unordered_map<std::uint32_t, std::shared_ptr<Entities::EntityInterface>> result(m_Skills.begin(), m_Skills.end());
 			return result;
@@ -42,7 +42,7 @@ namespace Interlude
 
 		void Reset() override
 		{
-			std::shared_lock<std::shared_timed_mutex>(m_Mutex);
+			std::shared_lock<std::shared_timed_mutex> lock(m_Mutex);
 			m_CastingTimers.StopAll();
 			m_ReloadingTimers.StopAll();
 			m_Skills.clear();
@@ -74,7 +74,7 @@ namespace Interlude
 
 		void OnGameEngineTicked(const Events::Event& evt)
 		{
-			std::shared_lock<std::shared_timed_mutex>(m_Mutex);
+			std::shared_lock<std::shared_timed_mutex> lock(m_Mutex);
 			if (evt.GetName() == Events::GameEngineTickedEvent::name)
 			{
 				for (auto it = m_Skills.begin(); it != m_Skills.end();)
@@ -95,7 +95,7 @@ namespace Interlude
 
 		void OnHeroDeleted(const Events::Event& evt)
 		{
-			std::shared_lock<std::shared_timed_mutex>(m_Mutex);
+			std::shared_lock<std::shared_timed_mutex> lock(m_Mutex);
 			if (evt.GetName() == Events::HeroDeletedEvent::name)
 			{
 				Reset();
@@ -105,7 +105,7 @@ namespace Interlude
 		//todo need to delete skills if they are not exists in create "queue"
 		void OnSkillCreated(const Events::Event& evt)
 		{
-			std::shared_lock<std::shared_timed_mutex>(m_Mutex);
+			std::shared_lock<std::shared_timed_mutex> lock(m_Mutex);
 			if (evt.GetName() == Events::SkillCreatedEvent::name)
 			{
 				if (m_IsNewCycle)
@@ -144,7 +144,7 @@ namespace Interlude
 		}
 		void OnSkillUsed(const Events::Event& evt)
 		{
-			std::shared_lock<std::shared_timed_mutex>(m_Mutex);
+			std::shared_lock<std::shared_timed_mutex> lock(m_Mutex);
 			if (evt.GetName() == Events::SkillUsedEvent::name)
 			{
 				const auto casted = static_cast<const Events::SkillUsedEvent&>(evt);
@@ -165,18 +165,18 @@ namespace Interlude
 				m_UsedSkillId = skill->GetId();
 
 				m_ReloadingTimers.StartTimer(skill->GetId(), skillInfo[3], [this] (uint32_t skillId) {
-					std::shared_lock<std::shared_timed_mutex>(m_Mutex);
+					std::shared_lock<std::shared_timed_mutex> lock(m_Mutex);
 					m_Skills[skillId]->StopReloading();
 				});
 				m_CastingTimers.StartTimer(skill->GetId(), skillInfo[2], [this] (uint32_t skillId) {
-					std::shared_lock<std::shared_timed_mutex>(m_Mutex);
+					std::shared_lock<std::shared_timed_mutex> lock(m_Mutex);
 					m_Skills[skillId]->StopCasting();
 				});
 			}
 		}
 		void OnSkillCancelled(const Events::Event& evt)
 		{
-			std::shared_lock<std::shared_timed_mutex>(m_Mutex);
+			std::shared_lock<std::shared_timed_mutex> lock(m_Mutex);
 			if (evt.GetName() == Events::SkillCancelledEvent::name)
 			{
 				const auto casted = static_cast<const Events::SkillCancelledEvent&>(evt);
@@ -200,7 +200,7 @@ namespace Interlude
 		}
 		void OnSkillToggled(const Events::Event& evt)
 		{
-			std::shared_lock<std::shared_timed_mutex>(m_Mutex);
+			std::shared_lock<std::shared_timed_mutex> lock(m_Mutex);
 			if (evt.GetName() == Events::AbnormalEffectChangedEvent::name)
 			{
 				const auto casted = static_cast<const Events::AbnormalEffectChangedEvent&>(evt);
@@ -242,6 +242,6 @@ namespace Interlude
 		const NetworkHandlerWrapper& m_NetworkHandler;
 		TimerMap m_ReloadingTimers;
 		TimerMap m_CastingTimers;
-		std::shared_timed_mutex m_Mutex;
+		mutable std::shared_timed_mutex m_Mutex;
 	};
 }

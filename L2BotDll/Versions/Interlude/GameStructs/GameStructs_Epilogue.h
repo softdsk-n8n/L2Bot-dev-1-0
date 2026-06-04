@@ -2,96 +2,80 @@
 
 #include "../../GameStructs/GameStructs.h"
 
-	namespace Interlude
+namespace Interlude
 {
 	class User
 	{
 	public:
-		// Entity type detection for Teon binary (kpyrkosz/L2InterludeBot pattern):
-		// First 5 int32s determine entity type:
-		//   Player:  [0,0,0,0,0]
-		//   NPC:     [0,0,1,0,0]
-		//   Monster: [0,0,1,0,1]
-		// The old "userType" field at 0x08 is WRONG for Teon — it reads 0 for everything
-		inline bool IsPlayer() const {
-			const int32_t* p = (const int32_t*)this;
-			return p[0] == 0 && p[1] == 0 && p[2] == 0 && p[3] == 0 && p[4] == 0;
-		}
-		inline bool IsNPC() const {
-			const int32_t* p = (const int32_t*)this;
-			return p[0] == 0 && p[1] == 0 && p[2] == 1 && p[3] == 0 && p[4] == 0;
-		}
-		inline bool IsMonster() const {
-			const int32_t* p = (const int32_t*)this;
-			return p[0] == 0 && p[1] == 0 && p[2] == 1 && p[3] == 0 && p[4] == 1;
-		}
-		// Legacy field — DO NOT USE for Teon, always reads 0 for all entity types
 		char pad_0000[8]; //0x0000
-		L2::UserType userType; //0x0008 — BROKEN for Teon, kept for struct layout compat
+		L2::UserType userType; //0x0008
 		char pad_000C[4]; //0x000C
-		int32_t isMob; //0x0010 — also unreliable for Teon
+		int32_t isMob; //0x0010
 		uint32_t npcId; //0x0014
 		uint32_t objectId; //0x0018
 		wchar_t nickname[24]; //0x001C
 		L2::Race raceId; //0x004C
 		L2::Gender gender; //0x0050
 		int32_t classId; //0x0054
-		uint32_t lvl; //0x0058 — confirmed via Engine.dll static analysis
-		int32_t exp; //0x005C — confirmed via Engine.dll static analysis
+		uint32_t lvl; //0x0058
+		int32_t exp; //0x005C
 		char pad_0060[4]; //0x0060
-		int32_t str; //0x0064 — confirmed via Engine.dll static analysis
-		int32_t dex; //0x0068 — confirmed via Engine.dll static analysis
-		int32_t con; //0x006C — confirmed via Engine.dll static analysis
-		int32_t int_; //0x0070 — confirmed via Engine.dll static analysis
-		int32_t wit; //0x0074 — confirmed via Engine.dll static analysis
-		int32_t men; //0x0078 — confirmed via Engine.dll static analysis
-		int32_t maxHp; //0x007C — confirmed via Engine.dll static analysis
-		int32_t hp; //0x0080 — confirmed via Engine.dll static analysis
-		int32_t maxMp; //0x0084 — confirmed via Engine.dll static analysis
-		int32_t mp; //0x0088 — confirmed via Engine.dll static analysis
+		int32_t str; //0x0064
+		int32_t dex; //0x0068
+		int32_t con; //0x006C
+		int32_t int_; //0x0070
+		int32_t wit; //0x0074
+		int32_t men; //0x0078
+		int32_t maxHp; //0x007C
+		int32_t hp; //0x0080
+		int32_t maxMp; //0x0084
+		int32_t mp; //0x0088
 		int32_t maxWeight; //0x008C
 		char pad_0090[8]; //0x0090
 		class L2::UserWear wear; //0x0098
 		char pad_010C[132]; //0x010C
 		class L2::FColor titleColor; //0x0190
-		int32_t pad_0194; //0x0194 pvp state: 0 - normal, 1 - pvp, 2 - blinking
+		int32_t pad_0194; //0x0194 pvp state
 		int32_t karma; //0x0198
-		char pad_019C[104]; //0x019C
-		class APawn* pawn; //0x0204
-		char pad_0208[12]; //0x0208
-		int32_t weight; //0x0214
-		int32_t sp; //0x0218
-		int32_t accuracy; //0x021C
-		int32_t critRate; //0x0220
-		int32_t pAttack; //0x0224
-		int32_t attackSpeed; //0x0228
-		int32_t pDefense; //0x022C
-		int32_t evasion; //0x0230
-		int32_t mAttack; //0x0234
-		int32_t mDefense; //0x0238
-		int32_t castingSpeed; //0x023C
-		char pad_0240[20]; //0x0240
-		wchar_t title[16]; //0x0254
-		char pad_0274[32]; //0x0274
-		int32_t pad_0294; //0x0294
-		char pad_0298[16]; //0x0298
-		int32_t hasDwarvenCraft; //0x02A8
-		int32_t attackSpeed2; //0x02AC
-		char pad_02B0[4]; //0x02B0
-		int32_t pkKills; //0x02B4
-		int32_t pvpKills; //0x02B8
-		char pad_02BC[4]; //0x02BC
-		int32_t activeClassId; //0x02C0
-		int32_t maxCp; //0x02C4
-		int32_t cp; //0x02C8
-		char pad_02CC[20]; //0x02CC
-		int16_t recRemaining; //0x02E0
-		int16_t evalScore; //0x02E2
-		int32_t invSlotCount; //0x02E4
-		char pad_02E8[32]; //0x02E8
-		class L2::FColor nicknameColor; //0x0308
-		char pad_030C[164]; //0x030C
-	}; //Size: 0x03B0
+		char pad_019C[276]; //0x019C (Epilogue: 276 bytes to reach pawn at 0x02B0)
+		class APawn* pawn; //0x02B0 (Epilogue: was 0x0204 in Interlude)
+		// Fields after pawn are unknown for Epilogue - not used by NPC/Player factories for coords
+		// NPCFactory only uses: objectId, isMob, npcId, nickname, title, maxHp, hp, maxMp, mp, maxCp, cp
+		// maxHp/hp/maxMp/mp are at 0x007C-0x0088 (before the shift) so they're fine
+		char pad_02B4[12]; //0x02B4
+		int32_t weight; //0x02C0 (guessed - shifted by 0xAC from Interlude 0x0214)
+		int32_t sp; //0x02C4
+		int32_t accuracy; //0x02C8
+		int32_t critRate; //0x02CC
+		int32_t pAttack; //0x02D0
+		int32_t attackSpeed; //0x02D4
+		int32_t pDefense; //0x02D8
+		int32_t evasion; //0x02DC
+		int32_t mAttack; //0x02E0
+		int32_t mDefense; //0x02E4
+		int32_t castingSpeed; //0x02E8
+		char pad_02EC[20]; //0x02EC
+		wchar_t title[16]; //0x0300
+		char pad_0320[32]; //0x0320
+		int32_t pad_0340; //0x0340
+		char pad_0344[16]; //0x0344
+		int32_t hasDwarvenCraft; //0x0354
+		int32_t attackSpeed2; //0x0358
+		char pad_035C[4]; //0x035C
+		int32_t pkKills; //0x0360
+		int32_t pvpKills; //0x0364
+		char pad_0368[4]; //0x0368
+		int32_t activeClassId; //0x036C
+		int32_t maxCp; //0x0370
+		int32_t cp; //0x0374
+		char pad_0378[20]; //0x0378
+		int16_t recRemaining; //0x038C
+		int16_t evalScore; //0x038E
+		int32_t invSlotCount; //0x0390
+		char pad_0394[32]; //0x0394
+		class L2::FColor nicknameColor; //0x03B4
+		char pad_03B8[164]; //0x03B8
+	}; //Size: 0x045C
 
 	class APawn
 	{
@@ -106,35 +90,18 @@
 		void* terrainInfo; //0x0040
 		char pad_0044[28]; //0x0044
 		int32_t ownerObjectId; //0x0060
-		char pad_0064[344]; //0x0064
-		class L2::FVector Location; //0x01BC
-		class L2::FRotator Rotation; //0x01C8
-		class L2::FVector Velocity; //0x01D4
-		class L2::FVector Acceleration; //0x01E0
-		char pad_01EC[336]; //0x01EC
-		class L2::FVector Location2; //0x033C
-		char pad_0348[4496]; //0x0348 — extends to 0x14D8
-
-		// AController at APawn+0x14D8 (kpyrkosz/L2InterludeBot)
-		// Contains is_dead, is_attacking, is_in_combat flags at +0x41C
-		// GetSelectedCreatureID() virtual method for target
-		class AController* controller; //0x14D8
-	}; //Size: 0x14DC
-
-	class AController
-	{
-	public:
-		char pad_0000[0x41C]; //0x0000
-		int32_t flags; //0x041C — bit0=is_dead, bit1=is_in_combat, bit2=is_attacking
-		char pad_0420[16]; //0x0420
-
-		// Virtual: GetSelectedCreatureID() — returns target objectId
-		virtual int GetSelectedCreatureID(void);
-
-		bool isDead() const { return (flags & 1) != 0; }
-		bool isInCombat() const { return (flags & 2) != 0; }
-		bool isAttacking() const { return (flags & 4) != 0; }
-	}; //Size: 0x0430
+		char pad_0064[264]; //0x0064 (Epilogue: 264 bytes, was 344 in Interlude)
+		class L2::FVector Location; //0x016C (Epilogue: was 0x01BC in Interlude)
+		class L2::FVector Destination; //0x0178 (Epilogue: new - move target position)
+		char pad_0184[4]; //0x0184 (Epilogue: flags/gap between Destination and PrevLocation)
+		class L2::FVector PrevLocation; //0x0188 (Epilogue: new - previous position)
+		class L2::FVector Velocity; //0x0194 (Epilogue: was 0x01D4 in Interlude)
+		class L2::FVector Acceleration; //0x01A0 (Epilogue: was 0x01E0 - reads as zeros in dump)
+		char pad_01AC[8]; //0x01AC (Epilogue: 8 bytes padding to reach 0x01B4)
+		class L2::FVector Location2; //0x01B4 (Epilogue: was 0x033C in Interlude)
+		class L2::FRotator Rotation; //0x01C0 (Epilogue: was 0x01C8 in Interlude)
+		char pad_01CC[336]; //0x01CC
+	}; //Size: 0x032C
 
 	class ALineagePlayerController
 	{

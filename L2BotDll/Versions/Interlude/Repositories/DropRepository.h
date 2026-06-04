@@ -18,7 +18,7 @@ namespace Interlude
 	public:
 		const std::unordered_map<std::uint32_t, std::shared_ptr<Entities::EntityInterface>> GetEntities() override
 		{
-			std::unique_lock<std::shared_timed_mutex>(m_Mutex);
+			std::unique_lock<std::shared_timed_mutex> lock(m_Mutex);
 
 			const auto allItems = FindAllObjects<Item*>(m_Radius, [this](float_t radius, int32_t prevId) {
 				return m_NetworkHandler.GetNextItem(radius, prevId);
@@ -27,14 +27,18 @@ namespace Interlude
 			std::unordered_map<std::uint32_t, std::shared_ptr<Entities::EntityInterface>> result;
 			for (const auto kvp : allItems) {
 				const auto item = kvp.second;
-				if (m_Drops.find(item->objectId) == m_Drops.end()) {
-					m_Drops[item->objectId] = m_Factory.Create(item);
+				try {
+					if (m_Drops.find(item->objectId) == m_Drops.end()) {
+						m_Drops[item->objectId] = m_Factory.Create(item);
+					}
+					else
+					{
+						m_Factory.Update(m_Drops[item->objectId], item);
+					}
+					result[item->objectId] = m_Drops[item->objectId];
+				} catch (...) {
+					// Skip drops with invalid data (no pawn, unreadable memory, missing item data)
 				}
-				else
-				{
-					m_Factory.Update(m_Drops[item->objectId], item);
-				}
-				result[item->objectId] = m_Drops[item->objectId];
 			}
 
 			return result;
@@ -42,7 +46,7 @@ namespace Interlude
 
 		void Reset() override
 		{
-			std::shared_lock<std::shared_timed_mutex>(m_Mutex);
+			std::shared_lock<std::shared_timed_mutex> lock(m_Mutex);
 			m_Drops.clear();
 		}
 
@@ -61,7 +65,7 @@ namespace Interlude
 		const NetworkHandlerWrapper& m_NetworkHandler;
 		const DropFactory& m_Factory;
 		const uint16_t m_Radius;
-		std::shared_timed_mutex m_Mutex;
+		mutable std::shared_timed_mutex m_Mutex;
 		std::unordered_map<uint32_t, std::shared_ptr<Entities::Drop>> m_Drops;
 	};
 }

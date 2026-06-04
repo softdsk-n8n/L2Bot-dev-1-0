@@ -26,7 +26,6 @@ namespace Interlude
 		static void(__thiscall* __AddInventoryItem)(GameEngine*, ItemInfo&);
 		static void(__thiscall* __OnReceiveUpdateItemList)(GameEngine*, UpdateItemListActionType, ItemInfo&);
 		static void(__thiscall* __OnExAutoSoulShot)(GameEngine*, L2ParamStack&);
-		static void(__thiscall* __Tick)(GameEngine*, float_t);
 		static void(__thiscall* __OnSay2)(GameEngine*, L2ParamStack&);
 		static void(__thiscall* __OnEndItemList)(GameEngine*);
 		static float(__thiscall* __GetMaxTickRate)(GameEngine*);
@@ -40,7 +39,6 @@ namespace Interlude
 		static void __fastcall __AddInventoryItem_hook(GameEngine* This, uint32_t /*edx*/, ItemInfo& itemInfo);
 		static void __fastcall __OnReceiveUpdateItemList_hook(GameEngine* This, uint32_t /*edx*/, UpdateItemListActionType actionType, ItemInfo& itemInfo);
 		static void __fastcall __OnExAutoSoulShot_hook(GameEngine* This, uint32_t /*edx*/, L2ParamStack& stack);
-		static void __fastcall __Tick_hook(GameEngine* This, uint32_t /*edx*/, float_t unk);
 		static void __fastcall __OnSay2_hook(GameEngine* This, uint32_t /*edx*/, L2ParamStack& stack);
 		static void __fastcall __OnEndItemList_hook(GameEngine* This, uint32_t /*edx*/);
 		static int __fastcall __OnDie_hook(GameEngine* This, int /*edx*/, User* creature, L2ParamStack& stack);

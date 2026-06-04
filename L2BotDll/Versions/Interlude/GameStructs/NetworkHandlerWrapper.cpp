@@ -1,6 +1,7 @@
 #include "pch.h"
 #include "../../../Common/apihook.h"
 #include "NetworkHandlerWrapper.h"
+#include "GameEngineWrapper.h"
 #include "Domain/Events/SpoiledEvent.h"
 #include "ProcessManipulation.h"
 #include "Domain/Services/ServiceLocator.h"
@@ -10,10 +11,11 @@ using namespace L2Bot::Domain;
 
 namespace Interlude
 {
-	void* NetworkHandlerWrapper::originalInitAddress = 0;
+	extern bool IsPawnValid(APawn* pawn);
+	extern bool ValidateAndReadPawnData(APawn* pawn, ALineagePlayerController*& outController, uint32_t& outTargetId, bool& outIsStanding);
+
 	NetworkHandlerWrapper::NetworkHandler* NetworkHandlerWrapper::_target = 0;
 
-	void(__thiscall* NetworkHandlerWrapper::__Init)(NetworkHandler*, float) = 0;
 	Item* (__thiscall* NetworkHandlerWrapper::__GetNextItem)(NetworkHandler*, float, int) = 0;
 	User* (__thiscall* NetworkHandlerWrapper::__GetNextCreature)(NetworkHandler*, float, int) = 0;
 	int(__thiscall* NetworkHandlerWrapper::__AddNetworkQueue)(NetworkHandler*, L2::NetworkPacket*) = 0;
@@ -28,62 +30,115 @@ namespace Interlude
 	void(__thiscall* NetworkHandlerWrapper::__ChangeWaitType)(NetworkHandler*, int) = 0;
 	void(__thiscall* NetworkHandlerWrapper::__RequestRestartPoint)(NetworkHandler*, L2ParamStack&) = 0;
 
-	Item* NetworkHandlerWrapper::GetNextItem(float_t radius, int prevId) const
+	// =====================================================================
+	// Standalone SEH helpers — MUST be free functions (no C++ destructors
+	// allowed in functions containing __try, per MSVC C2712).
+	// __thiscall calling convention: this in ECX, args on stack.
+	// We call via __fastcall cast: (ECX=this, EDX=dummy, stack=args).
+	// =====================================================================
+
+	static User* SafeCallGetNextCreature(void* target, void* fnPtr, float radius, int prevId)
 	{
 		__try {
-			if (__GetNextItem && _target) {
-				return (*__GetNextItem)(_target, radius, prevId);
-			}
-			return 0;
+			typedef User* (__fastcall *FnType)(void*, int, float, int);
+			return ((FnType)fnPtr)(target, 0, radius, prevId);
+		} __except (EXCEPTION_EXECUTE_HANDLER) {
+			return (User*)1; // 1 = crashed (distinguish from null = not found)
 		}
-		__except (EXCEPTION_EXECUTE_HANDLER)
-		{
-			throw CriticalRuntimeException(L"UNetworkHandler::GetNextItem failed");
+	}
+
+	static Item* SafeCallGetNextItem(void* target, void* fnPtr, float radius, int prevId)
+	{
+		__try {
+			typedef Item* (__fastcall *FnType)(void*, int, float, int);
+			return ((FnType)fnPtr)(target, 0, radius, prevId);
+		} __except (EXCEPTION_EXECUTE_HANDLER) {
+			return (Item*)1;
 		}
+	}
+
+	// =====================================================================
+	// NetworkHandlerWrapper member functions
+	// =====================================================================
+
+	Item* NetworkHandlerWrapper::GetNextItem(float_t radius, int prevId) const
+	{
+		if (__GetNextItem && _target) {
+			Item* result = SafeCallGetNextItem((void*)_target, (void*)__GetNextItem, radius, prevId);
+			return (result == (Item*)1) ? 0 : result;
+		}
+		return 0;
 	}
 
 	User* NetworkHandlerWrapper::GetNextCreature(float_t radius, int prevId) const
 	{
-		__try {
-			if (__GetNextCreature && _target) {
-				return (*__GetNextCreature)(_target, radius, prevId);
-			}
-			return 0;
+		if (__GetNextCreature && _target) {
+			User* result = SafeCallGetNextCreature((void*)_target, (void*)__GetNextCreature, radius, prevId);
+			return (result == (User*)1) ? 0 : result;
 		}
-		__except (EXCEPTION_EXECUTE_HANDLER)
-		{
-			throw RuntimeException(L"UNetworkHandler::GetNextCreature failed");
-		}
+		return 0;
 	}
 
 	User* NetworkHandlerWrapper::GetHero() const
 	{
-		const auto creatures = FindAllObjects<User*>(0.1f, [this](float_t radius, int32_t prevId) {
+		if (!_target || !__GetNextCreature) {
+			return 0;
+		}
+
+		// PRIMARY: Use game's own my_player_id global
+		// Engine.dll+0x81F530 holds our character's objectId
+		{
+			int myId = GetMyObjectId();
+			if (myId != 0) {
+				User* hero = GetUser(myId);
+				if (hero && hero->IsPlayer() && hero->pawn != nullptr) {
+					return hero;
+				}
+			}
+		}
+
+		// FALLBACK: iterate creatures if direct lookup failed
+		const auto creatures = FindAllObjects<User*>(4000.0f, [this](float_t radius, int32_t prevId) {
 			return GetNextCreature(radius, prevId);
 		});
 
 		for (const auto& kvp : creatures)
 		{
 			const auto& creature = static_cast<User*>(kvp.second);
-			if (creature->userType == L2::UserType::USER && creature->lvl > 0)
+			if (creature->IsPlayer() && creature->pawn != nullptr && creature->classId > 0)
 			{
+				if (!IsPawnValid(creature->pawn)) {
+					continue;
+				}
 				return creature;
 			}
 		}
 		return 0;
 	}
 
+	int NetworkHandlerWrapper::GetMyObjectId() const
+	{
+		HMODULE hEng = GetModuleHandleA("Engine.dll");
+		if (!hEng) return 0;
+		__try {
+			return *(int*)((char*)hEng + 0x81F530);
+		} __except(EXCEPTION_EXECUTE_HANDLER) {
+			return 0;
+		}
+	}
+
 	User* NetworkHandlerWrapper::GetUser(int objectId) const
 	{
 		__try {
 			if (__GetUser && _target) {
-				return (*__GetUser)(_target, objectId);
+				typedef User* (__fastcall *FnType)(void*, int, int);
+				return ((FnType)(void*)__GetUser)((void*)_target, 0, objectId);
 			}
 			return 0;
 		}
 		__except (EXCEPTION_EXECUTE_HANDLER)
 		{
-			throw RuntimeException(L"UNetworkHandler::GetUser failed");
+			return 0;
 		}
 	}
 
@@ -91,13 +146,14 @@ namespace Interlude
 	{
 		__try {
 			if (__GetItem && _target) {
-				return (*__GetItem)(_target, objectId);
+				typedef Item* (__fastcall *FnType)(void*, int, int);
+				return ((FnType)(void*)__GetItem)((void*)_target, 0, objectId);
 			}
 			return 0;
 		}
 		__except (EXCEPTION_EXECUTE_HANDLER)
 		{
-			throw RuntimeException(L"UNetworkHandler::GetItem failed");
+			return 0;
 		}
 	}
 
@@ -105,52 +161,47 @@ namespace Interlude
 	{
 		__try {
 			if (__MTL && _target) {
-				(*__MTL)(_target, self, dst, src, terrainInfo, unk1);
+				typedef void (__fastcall *FnType)(void*, int, APawn*, L2::FVector, L2::FVector, void*, int);
+				((FnType)(void*)__MTL)((void*)_target, 0, self, dst, src, terrainInfo, unk1);
 			}
 		}
-		__except (EXCEPTION_EXECUTE_HANDLER)
-		{
-			throw RuntimeException(L"UNetworkHandler::MTL failed");
-		}
+		__except (EXCEPTION_EXECUTE_HANDLER) {}
 	}
 
 	void NetworkHandlerWrapper::Action(int objectId, L2::FVector objectLocation, int unk) const
 	{
 		__try {
 			if (__Action && _target) {
-				(*__Action)(_target, objectId, objectLocation, unk);
+				typedef void (__fastcall *FnType)(void*, int, int, L2::FVector, int);
+				((FnType)(void*)__Action)((void*)_target, 0, objectId, objectLocation, unk);
 			}
 		}
-		__except (EXCEPTION_EXECUTE_HANDLER)
-		{
-			throw RuntimeException(L"UNetworkHandler::Action failed");
-		}
+		__except (EXCEPTION_EXECUTE_HANDLER) {}
 	}
 
 	void NetworkHandlerWrapper::RequestMagicSkillUse(L2ParamStack& stack) const
 	{
 		__try {
 			if (__RequestMagicSkillUse && _target) {
-				(*__RequestMagicSkillUse)(_target, stack);
+				typedef void (__fastcall *FnType)(void*, int, L2ParamStack&);
+				((FnType)(void*)__RequestMagicSkillUse)((void*)_target, 0, stack);
 			}
 		}
-		__except (EXCEPTION_EXECUTE_HANDLER)
-		{
-			throw RuntimeException(L"UNetworkHandler::RequestMagicSkillUse failed");
-		}
+		__except (EXCEPTION_EXECUTE_HANDLER) {}
 	}
 
 	int NetworkHandlerWrapper::RequestUseItem(L2ParamStack& stack) const
 	{
 		__try {
 			if (__RequestUseItem && _target) {
-				return (*__RequestUseItem)(_target, stack);
+				typedef int (__fastcall *FnType)(void*, int, L2ParamStack&);
+				return ((FnType)(void*)__RequestUseItem)((void*)_target, 0, stack);
 			}
 			return 0;
 		}
 		__except (EXCEPTION_EXECUTE_HANDLER)
 		{
-			throw RuntimeException(L"UNetworkHandler::RequestUseItem failed");
+			return 0;
 		}
 	}
 
@@ -158,39 +209,36 @@ namespace Interlude
 	{
 		__try {
 			if (__RequestAutoSoulShot && _target) {
-				(*__RequestAutoSoulShot)(_target, stack);
+				typedef void (__fastcall *FnType)(void*, int, L2ParamStack&);
+				((FnType)(void*)__RequestAutoSoulShot)((void*)_target, 0, stack);
 			}
 		}
-		__except (EXCEPTION_EXECUTE_HANDLER)
-		{
-			throw RuntimeException(L"UNetworkHandler::RequestAutoSoulShot failed");
-		}
+		__except (EXCEPTION_EXECUTE_HANDLER) {}
 	}
 
 	void NetworkHandlerWrapper::ChangeWaitType(int type) const
 	{
 		__try {
 			if (__ChangeWaitType && _target) {
-				(*__ChangeWaitType)(_target, type);
+				typedef void (__fastcall *FnType)(void*, int, int);
+				((FnType)(void*)__ChangeWaitType)((void*)_target, 0, type);
 			}
 		}
-		__except (EXCEPTION_EXECUTE_HANDLER)
-		{
-			throw RuntimeException(L"UNetworkHandler::ChangeWaitType failed");
-		}
+		__except (EXCEPTION_EXECUTE_HANDLER) {}
 	}
 
 	int NetworkHandlerWrapper::RequestItemList() const
 	{
 		__try {
 			if (__RequestItemList && _target) {
-				return (*__RequestItemList)(_target);
+				typedef int (__fastcall *FnType)(void*, int);
+				return ((FnType)(void*)__RequestItemList)((void*)_target, 0);
 			}
 			return 0;
 		}
 		__except (EXCEPTION_EXECUTE_HANDLER)
 		{
-			throw RuntimeException(L"UNetworkHandler::RequestItemList failed");
+			return 0;
 		}
 	}
 
@@ -198,21 +246,30 @@ namespace Interlude
 	{
 		__try {
 			if (__RequestRestartPoint && _target) {
-				(*__RequestRestartPoint)(_target, stack);
+				typedef void (__fastcall *FnType)(void*, int, L2ParamStack&);
+				((FnType)(void*)__RequestRestartPoint)((void*)_target, 0, stack);
 			}
 		}
-		__except (EXCEPTION_EXECUTE_HANDLER)
-		{
-			throw RuntimeException(L"UNetworkHandler::RequestRestartPoint failed");
+		__except (EXCEPTION_EXECUTE_HANDLER) {}
+	}
+
+	// =====================================================================
+	// Hook setup
+	// =====================================================================
+
+	static FARPROC ResolveThunk(FARPROC thunkAddr)
+	{
+		if (thunkAddr == 0) return 0;
+		unsigned char* p = (unsigned char*)thunkAddr;
+		if (p[0] == 0xE9) {
+			int32_t offset = *(int32_t*)(p + 1);
+			return (FARPROC)(p + 5 + offset);
 		}
+		return thunkAddr;
 	}
 
 	void NetworkHandlerWrapper::Init(HMODULE hModule)
 	{
-		void* initAddress = GetProcAddress(hModule, "?Tick@UNetworkHandler@@UAEXM@Z");
-		originalInitAddress = splice(initAddress, __Init_hook);
-		(FARPROC&)__Init = (FARPROC)initAddress;
-
 		(FARPROC&)__GetNextItem = GetProcAddress(hModule, "?GetNextItem@UNetworkHandler@@UAEPAUItem@@MH@Z");
 		(FARPROC&)__GetNextCreature = GetProcAddress(hModule, "?GetNextCreature@UNetworkHandler@@UAEPAUUser@@MH@Z");
 		(FARPROC&)__RequestItemList = GetProcAddress(hModule, "?RequestItemList@UNetworkHandler@@UAEHXZ");
@@ -225,43 +282,33 @@ namespace Interlude
 		(FARPROC&)__RequestAutoSoulShot = GetProcAddress(hModule, "?RequestAutoSoulShot@UNetworkHandler@@UAEXAAVL2ParamStack@@@Z");
 		(FARPROC&)__ChangeWaitType = GetProcAddress(hModule, "?ChangeWaitType@UNetworkHandler@@UAEXH@Z");
 		(FARPROC&)__RequestRestartPoint = GetProcAddress(hModule, "?RequestRestartPoint@UNetworkHandler@@UAEXAAVL2ParamStack@@@Z");
-		
-		(FARPROC&)__AddNetworkQueue = (FARPROC)splice(
-			GetProcAddress(hModule, "?AddNetworkQueue@UNetworkHandler@@UAEHPAUNetworkPacket@@@Z"), __AddNetworkQueue_hook
-		);
-		Services::ServiceLocator::GetInstance().GetLogger()->Info(L"UNetworkHandler hooks initialized");
+
+		FARPROC addNQThunk = GetProcAddress(hModule, "?AddNetworkQueue@UNetworkHandler@@UAEHPAUNetworkPacket@@@Z");
+		FARPROC addNQ = ResolveThunk(addNQThunk);
+		if (addNQ) {
+			(FARPROC&)__AddNetworkQueue = (FARPROC)splice(addNQ, __AddNetworkQueue_hook);
+		}
 	}
 
 	void NetworkHandlerWrapper::Restore()
 	{
-		restore(originalInitAddress);
-		restore((void*&)__AddNetworkQueue);
+		if (__AddNetworkQueue) restore((void*&)__AddNetworkQueue);
 		Services::ServiceLocator::GetInstance().GetLogger()->Info(L"UNetworkHandler hooks restored");
-	}
-
-	void __fastcall NetworkHandlerWrapper::__Init_hook(NetworkHandler* This, int /*edx*/, float unk)
-	{
-		if (_target == 0) {
-			_target = This;
-			Services::ServiceLocator::GetInstance().GetLogger()->Info(L"UNetworkHandler pointer {:#010x} obtained", (int)_target);
-
-			InjectLibrary::StopCurrentProcess();
-			restore(originalInitAddress);
-			InjectLibrary::StartCurrentProcess();
-
-			(*__Init)(This, unk);
-		}
 	}
 
 	int __fastcall NetworkHandlerWrapper::__AddNetworkQueue_hook(NetworkHandler* This, int, L2::NetworkPacket* packet)
 	{
+		if (_target == 0) {
+			_target = This;
+		}
+
 		if (packet->id == static_cast<int>(L2::NetworkPacketId::SYSTEM_MESSAGE)) {
 			L2::SystemMessagePacket* p = static_cast<L2::SystemMessagePacket*>(packet);
 			if (
 				p->GetMessageId() == static_cast<int>(L2::SystemMessagePacket::Type::SPOIL_SUCCESS) ||
 				p->GetMessageId() == static_cast<int>(L2::SystemMessagePacket::Type::ALREADY_SPOILED)
 				) {
-				Services::ServiceLocator::GetInstance().GetEventDispatcher()->Dispatch(Events::SpoiledEvent{});
+				Services::ServiceLocator::GetInstance().GetEventDispatcher()->Enqueue(Events::SpoiledEvent{});
 			}
 		}
 
