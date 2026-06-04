@@ -4,60 +4,85 @@
 #include <string>
 #include <memory>
 #include <cstdint>
-#include <format>
 #include "Domain/Exceptions.h"
 #include "Domain/Services/ServiceLocator.h"
 
-#define BUFFER_SIZE 16384
+#define BUFFER_SIZE 65536
 
-class NamedPipe
-{
-public:
+	class NamedPipe
+	{
+	public:
+		// Create a security descriptor that allows Everyone to access the pipe
+		// This is needed because L2.exe runs as admin and Client.exe may not
+		static SECURITY_ATTRIBUTES* GetPipeSecurityAttributes()
+		{
+			static SECURITY_ATTRIBUTES sa;
+			static SECURITY_DESCRIPTOR sd;
+			static bool initialized = false;
+			if (!initialized) {
+				initialized = true;
+				InitializeSecurityDescriptor(&sd, SECURITY_DESCRIPTOR_REVISION);
+				// Grant full access to Everyone (S-1-1-0)
+				SetSecurityDescriptorDacl(&sd, TRUE, NULL, FALSE);
+				sa.nLength = sizeof(SECURITY_ATTRIBUTES);
+				sa.lpSecurityDescriptor = &sd;
+				sa.bInheritHandle = FALSE;
+			}
+			return &sa;
+		}
+
 	const bool Connect(const std::wstring& pipeName)
 	{
-		if (m_Pipe == NULL || m_PipeName != pipeName)
+		if (m_Pipe != NULL)
 		{
-			if (m_Pipe != NULL) {
-				DisconnectNamedPipe(m_Pipe);
-				CloseHandle(m_Pipe);
-			}
-			else
-			{
-				CreateOverlapped(m_ConntectingOverlapped);
-				CreateOverlapped(m_ReadingOverlapped);
-				CreateOverlapped(m_WritingOverlapped);
-			}
-
-			m_Pipe = CreateNamedPipeW((L"\\\\.\\pipe\\" + pipeName).c_str(),
-				PIPE_ACCESS_DUPLEX | FILE_FLAG_OVERLAPPED,
-				PIPE_TYPE_MESSAGE | PIPE_READMODE_MESSAGE | PIPE_WAIT,
-				PIPE_UNLIMITED_INSTANCES,
-				BUFFER_SIZE * sizeof(wchar_t),
-				BUFFER_SIZE * sizeof(wchar_t),
-				NMPWAIT_USE_DEFAULT_WAIT,
-				NULL
-			);
-
-			if (m_Pipe == INVALID_HANDLE_VALUE)
-			{
-				throw CriticalRuntimeException(std::format(L"cannot create the pipe {}: {}", m_PipeName, GetLastError()));
-			}
-		}
-		else
-		{
+			FlushFileBuffers(m_Pipe);
 			DisconnectNamedPipe(m_Pipe);
+			CloseHandle(m_Pipe);
+			m_Pipe = NULL;
 		}
 
-		TryToConnect();
+		m_Pipe = CreateNamedPipeW((L"\\\\.\\pipe\\" + pipeName).c_str(),
+			PIPE_ACCESS_DUPLEX | FILE_FLAG_OVERLAPPED,
+			PIPE_TYPE_MESSAGE | PIPE_READMODE_MESSAGE | PIPE_WAIT,
+			PIPE_UNLIMITED_INSTANCES,
+			BUFFER_SIZE * sizeof(wchar_t),
+			BUFFER_SIZE * sizeof(wchar_t),
+			NMPWAIT_USE_DEFAULT_WAIT,
+			GetPipeSecurityAttributes()
+		);
 
-		WaitForMultipleObjects(1, &m_ConntectingOverlapped.hEvent, false, INFINITE);
-
-		DWORD ret;
-		m_Connected = GetOverlappedResult(m_Pipe, &m_ConntectingOverlapped, &ret, false);
+		if (m_Pipe == INVALID_HANDLE_VALUE)
+		{
+			throw CriticalRuntimeException(L"cannot create the pipe " + pipeName + L": " + std::to_wstring(GetLastError()));
+		}
 
 		m_PipeName = pipeName;
 
-		return m_Connected;
+		// Overlapped ConnectNamedPipe — wait for client to connect
+		OVERLAPPED ol = {};
+		ol.hEvent = CreateEvent(NULL, TRUE, FALSE, NULL);
+		if (ol.hEvent == NULL) {
+			throw CriticalRuntimeException(L"cannot create connect event");
+		}
+
+		BOOL connected = ConnectNamedPipe(m_Pipe, &ol);
+		if (!connected) {
+			DWORD err = GetLastError();
+			if (err == ERROR_IO_PENDING) {
+				// Wait for client connection (blocking in Connect thread)
+				WaitForSingleObject(ol.hEvent, INFINITE);
+				DWORD bytesTransferred = 0;
+				GetOverlappedResult(m_Pipe, &ol, &bytesTransferred, FALSE);
+			} else if (err != ERROR_PIPE_CONNECTED) {
+				CloseHandle(ol.hEvent);
+				m_Connected = false;
+				throw CriticalRuntimeException(L"cannot connect the pipe " + m_PipeName + L": " + std::to_wstring(err));
+			}
+		}
+		CloseHandle(ol.hEvent);
+
+		m_Connected = true;
+		return true;
 	}
 
 	void Send(const std::wstring& message)
@@ -67,68 +92,122 @@ public:
 			return;
 		}
 
-		const std::wstring preparedMessage = message + L"\n";
+		OVERLAPPED ol = {};
+		ol.hEvent = CreateEvent(NULL, TRUE, FALSE, NULL);
+		if (ol.hEvent == NULL) {
+			m_Connected = false;
+			return;
+		}
 
-		DWORD written;
-		const auto result = WriteFile(m_Pipe, message.c_str(), (message.size() + 1) * sizeof(wchar_t), &written, &m_WritingOverlapped);
-
-		const auto lastError = GetLastError();
-		if (!result)
-		{
-			if (lastError == ERROR_IO_PENDING)
-			{
-				WaitForMultipleObjects(1, &m_WritingOverlapped.hEvent, false, INFINITE);
-				DWORD ret;
-				const auto overlappedResult = GetOverlappedResult(m_Pipe, &m_WritingOverlapped, &ret, false);
-				if (!overlappedResult)
-				{
-					m_Connected = false;
-					throw CriticalRuntimeException(std::format(L"cannot get overlapped result for the pipe {} when writing", m_PipeName));
+		DWORD written = 0;
+		BOOL ok = WriteFile(m_Pipe, message.c_str(), (DWORD)((message.size() + 1) * sizeof(wchar_t)), &written, &ol);
+		if (!ok) {
+			DWORD err = GetLastError();
+			if (err == ERROR_IO_PENDING) {
+				DWORD waitResult = WaitForSingleObject(ol.hEvent, 1000);
+				if (waitResult == WAIT_OBJECT_0) {
+					DWORD bytesTransferred = 0;
+					GetOverlappedResult(m_Pipe, &ol, &bytesTransferred, FALSE);
+					CloseHandle(ol.hEvent);
+					return;
 				}
-			}
-			else
-			{
+				CancelIo(m_Pipe);
+				CloseHandle(ol.hEvent);
 				m_Connected = false;
-				throw CriticalRuntimeException(std::format(L"cannot write to the pipe {}: {}", m_PipeName, lastError));
+				return;
 			}
+			// Pipe errors (BROKEN_PIPE, etc.) = client gone.
+			// Set disconnected, let Connect thread handle reconnection.
+			// Do NOT throw CriticalRuntimeException — it used to kill the DLL.
+			CloseHandle(ol.hEvent);
+			m_Connected = false;
+			return;
+		}
+		CloseHandle(ol.hEvent);
+	}
+
+	// Flush the pipe output buffer — pushes all pending data to the client.
+	// Must be called AFTER all messages are written in a batch.
+	// WARNING: This can block if the client isn't reading. Call from a context
+	// that can tolerate a brief block (e.g. after StartCurrentProcess when
+	// L2 threads are running). Keep a short timeout by calling from a thread
+	// that can be interrupted.
+	void FlushOutput()
+	{
+		if (m_Pipe != NULL && m_Pipe != INVALID_HANDLE_VALUE && m_Connected)
+		{
+			FlushFileBuffers(m_Pipe);
 		}
 	}
 
-	const std::wstring Receive()
+	void Flush()
+	{
+		if (m_Pipe != NULL && m_Pipe != INVALID_HANDLE_VALUE)
+		{
+			FlushFileBuffers(m_Pipe);
+		}
+	}
+
+	void Close()
+	{
+		if (m_Pipe != NULL && m_Pipe != INVALID_HANDLE_VALUE)
+		{
+			FlushFileBuffers(m_Pipe);
+			DisconnectNamedPipe(m_Pipe);
+			CloseHandle(m_Pipe);
+			m_Pipe = NULL;
+			m_Connected = false;
+		}
+	}
+
+		const std::wstring Receive()
 	{
 		if (!m_Connected)
 		{
 			return L"";
 		}
 
-		DWORD dwRead;
-		std::unique_ptr<wchar_t[]> buffer = std::make_unique<wchar_t[]>(BUFFER_SIZE);
-		const auto result = ReadFile(m_Pipe, buffer.get(), BUFFER_SIZE * sizeof(wchar_t), &dwRead, &m_ReadingOverlapped);
+		OVERLAPPED ol = {};
+		ol.hEvent = CreateEvent(NULL, TRUE, FALSE, NULL);
+		if (ol.hEvent == NULL) {
+			m_Connected = false;
+			return L"";
+		}
 
-		const auto lastError = GetLastError();
-		if (!result)
-		{
-			if (lastError == ERROR_IO_PENDING)
-			{
-				WaitForMultipleObjects(1, &m_ReadingOverlapped.hEvent, false, INFINITE);
-				DWORD ret;
-				const auto overlappedResult = GetOverlappedResult(m_Pipe, &m_ReadingOverlapped, &ret, false);
-				if (!overlappedResult)
-				{
-					m_Connected = false;
-					throw CriticalRuntimeException(std::format(L"cannot get overlapped result for the pipe {} when reading", m_PipeName));
+		DWORD dwRead = 0;
+		std::unique_ptr<wchar_t[]> buffer = std::make_unique<wchar_t[]>(BUFFER_SIZE);
+		BOOL ok = ReadFile(m_Pipe, buffer.get(), BUFFER_SIZE * sizeof(wchar_t), &dwRead, &ol);
+		if (!ok) {
+			DWORD err = GetLastError();
+			if (err == ERROR_IO_PENDING) {
+				DWORD waitResult = WaitForSingleObject(ol.hEvent, 200);
+				if (waitResult == WAIT_OBJECT_0) {
+					DWORD bytesTransferred = 0;
+					GetOverlappedResult(m_Pipe, &ol, &bytesTransferred, FALSE);
+					dwRead = bytesTransferred;
+				} else {
+					CancelIo(m_Pipe);
+					CloseHandle(ol.hEvent);
+					return L"";
 				}
-			}
-			else
-			{
+			} else {
+				// Pipe errors (ERROR_BROKEN_PIPE, etc.) = client gone.
+				// Set disconnected, let Connect thread handle reconnection.
+				// Do NOT throw CriticalRuntimeException — it used to kill the DLL.
+				CloseHandle(ol.hEvent);
 				m_Connected = false;
-				throw CriticalRuntimeException(std::format(L"cannot read from the pipe {}: {}", m_PipeName, lastError));
+				return L"";
 			}
 		}
 
-		std::wstring message = std::wstring(buffer.get());
+		CloseHandle(ol.hEvent);
 
-		return message;
+		if (dwRead == 0)
+		{
+			return L"";
+		}
+
+		return std::wstring(buffer.get());
 	}
 
 	const bool IsConnected() const
@@ -140,53 +219,14 @@ public:
 	{
 		if (m_Pipe != NULL)
 		{
+			DisconnectNamedPipe(m_Pipe);
 			CloseHandle(m_Pipe);
 		}
 	}
 	NamedPipe() = default;
 
 private:
-	void TryToConnect()
-	{
-		const bool connected = ConnectNamedPipe(m_Pipe, &m_ConntectingOverlapped) == 0;
-		if (!connected)
-		{
-			throw CriticalRuntimeException(std::format(L"cannot connect the pipe {}: {}", m_PipeName, GetLastError()));
-		}
-
-		switch (GetLastError())
-		{
-			// The overlapped connection in progress. 
-		case ERROR_IO_PENDING:
-			break;
-			// Client is already connected, so signal an event. 
-		case ERROR_PIPE_CONNECTED:
-			if (SetEvent(m_ConntectingOverlapped.hEvent))
-				break;
-		default:
-			throw CriticalRuntimeException(std::format(L"an error has occurred when connecting to the pipe ""{}"": {}", m_PipeName, GetLastError()));
-		}
-	}
-
-	void CreateOverlapped(OVERLAPPED& overlapped)
-	{
-		if (overlapped.hEvent == NULL)
-		{
-			overlapped.hEvent = CreateEvent(NULL, TRUE, TRUE, NULL);
-			if (overlapped.hEvent == NULL)
-			{
-				throw CriticalRuntimeException(std::format(L"cannot create overlapped for the pipe {}: {}", m_PipeName, GetLastError()));
-			}
-			overlapped.Offset = 0;
-			overlapped.OffsetHigh = 0;
-		}
-	}
-
-private:
 	std::wstring m_PipeName = L"";
 	HANDLE m_Pipe = NULL;
 	bool m_Connected = false;
-	OVERLAPPED m_ConntectingOverlapped = OVERLAPPED();
-	OVERLAPPED m_ReadingOverlapped = OVERLAPPED();
-	OVERLAPPED m_WritingOverlapped = OVERLAPPED();
 };

@@ -7,7 +7,7 @@
 
 using namespace L2Bot::Domain;
 
-class NamedPipeTransport : public Transports::TransportInterface
+	class NamedPipeTransport : public Transports::TransportInterface
 {
 public:
 	const bool Connect() override
@@ -17,22 +17,17 @@ public:
 			return false;
 		}
 
-		Services::ServiceLocator::GetInstance().GetLogger()->Info(L"client connected to the connection pipe ""{}""", m_PipeName);
-
 		const auto mainPipeName = GenerateUUID();
-
 		m_ConnectionPipe.Send(mainPipeName);
-
-		Services::ServiceLocator::GetInstance().GetLogger()->Info(L"name ""{}"" of the main pipe sended", mainPipeName);
+		m_ConnectionPipe.Flush();
+		m_ConnectionPipe.Close();
 
 		if (!m_Pipe.Connect(mainPipeName))
 		{
 			return false;
 		}
-		Services::ServiceLocator::GetInstance().GetLogger()->Info(L"client connected to the main pipe ""{}""", mainPipeName);
 
 		m_Pipe.Send(L"Hello!");
-
 		return true;
 	}
 
@@ -45,6 +40,13 @@ public:
 
 		m_Pipe.Send(data);
 	}
+
+	// Flush output after batch of messages. See NamedPipe::FlushOutput().
+	void FlushOutput()
+	{
+		m_Pipe.FlushOutput();
+	}
+
 	const std::wstring Receive() override
 	{
 		if (!m_Pipe.IsConnected())
