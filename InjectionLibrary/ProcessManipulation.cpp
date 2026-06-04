@@ -39,10 +39,10 @@ namespace InjectLibrary
 			thread.dwSize = sizeof(LPTHREADENTRY32);
 			if (Thread32First(snap, &thread)) {
 				do {
-					if (thread.th32ThreadID != currThread && thread.th32OwnerProcessID != processId) {
+					if (thread.th32ThreadID != currThread && thread.th32OwnerProcessID == processId) {
 						threadHandle = OpenThread(THREAD_SUSPEND_RESUME, FALSE, thread.th32ThreadID);
 						if (threadHandle == 0) {
-							break;
+							continue;
 						}
 						ResumeThread(threadHandle);
 						CloseHandle(threadHandle);
@@ -68,10 +68,10 @@ namespace InjectLibrary
 			thread.dwSize = sizeof(LPTHREADENTRY32);
 			if (Thread32First(snap, &thread)) {
 				do {
-					if (thread.th32ThreadID != currThread && thread.th32OwnerProcessID != processId) {
+					if (thread.th32ThreadID != currThread && thread.th32OwnerProcessID == processId) {
 						threadHandle = OpenThread(THREAD_SUSPEND_RESUME, FALSE, thread.th32ThreadID);
 						if (threadHandle == 0) {
-							break;
+							continue;
 						}
 						SuspendThread(threadHandle);
 						CloseHandle(threadHandle);
@@ -85,5 +85,31 @@ namespace InjectLibrary
 	void StopCurrentProcess()
 	{
 		StopProcess(GetCurrentProcessId());
+	}
+
+	void StopCurrentProcessExcluding(const std::set<DWORD>& excludeThreadIds)
+	{
+		DWORD currThread = GetCurrentThreadId();
+		HANDLE snap = CreateToolhelp32Snapshot(TH32CS_SNAPTHREAD, 0);
+		THREADENTRY32 thread;
+		HANDLE threadHandle;
+		DWORD processId = GetCurrentProcessId();
+		if (snap != INVALID_HANDLE_VALUE) {
+			thread.dwSize = sizeof(LPTHREADENTRY32);
+			if (Thread32First(snap, &thread)) {
+				do {
+					// Skip: own thread, threads from other processes, excluded threads
+					if (thread.th32ThreadID != currThread && thread.th32OwnerProcessID == processId && excludeThreadIds.find(thread.th32ThreadID) == excludeThreadIds.end()) {
+						threadHandle = OpenThread(THREAD_SUSPEND_RESUME, FALSE, thread.th32ThreadID);
+						if (threadHandle == 0) {
+							continue;
+						}
+						SuspendThread(threadHandle);
+						CloseHandle(threadHandle);
+					}
+				} while (Thread32Next(snap, &thread));
+			}
+			CloseHandle(snap);
+		}
 	}
 }
