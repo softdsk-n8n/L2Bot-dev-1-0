@@ -30,6 +30,7 @@ namespace L2Bot::Domain::Events
 
 		ChatMessageCreatedEvent() = delete;
 		virtual ~ChatMessageCreatedEvent() = default;
+		Event* Clone() const override { return new ChatMessageCreatedEvent(*this); }
 
 	private:
 		const DTO::ChatMessageData m_ChatMessage;

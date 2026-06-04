@@ -16,5 +16,6 @@ namespace L2Bot::Domain::Events
 
 		HeroDeletedEvent() = default;
 		virtual ~HeroDeletedEvent() = default;
+		Event* Clone() const override { return new HeroDeletedEvent(*this); }
 	};
 }

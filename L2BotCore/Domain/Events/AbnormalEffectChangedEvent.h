@@ -29,6 +29,7 @@ namespace L2Bot::Domain::Events
 
 		AbnormalEffectChangedEvent() = delete;
 		virtual ~AbnormalEffectChangedEvent() = default;
+		Event* Clone() const override { return new AbnormalEffectChangedEvent(*this); }
 
 	private:
 		const std::vector<int32_t> m_SkillInfo;

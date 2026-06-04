@@ -30,6 +30,7 @@ namespace L2Bot::Domain::Events
 
 		ItemCreatedEvent() = delete;
 		virtual ~ItemCreatedEvent() = default;
+		Event* Clone() const override { return new ItemCreatedEvent(*this); }
 
 	private:
 		const DTO::ItemData m_ItemData;

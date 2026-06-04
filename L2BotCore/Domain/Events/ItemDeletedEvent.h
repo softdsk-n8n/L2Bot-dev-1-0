@@ -29,6 +29,7 @@ namespace L2Bot::Domain::Events
 
 		ItemDeletedEvent() = delete;
 		virtual ~ItemDeletedEvent() = default;
+		Event* Clone() const override { return new ItemDeletedEvent(*this); }
 
 	private:
 		const uint32_t m_ObjectId;

@@ -29,6 +29,7 @@ namespace L2Bot::Domain::Events
 
 		ItemAutousedEvent() = delete;
 		virtual ~ItemAutousedEvent() = default;
+		Event* Clone() const override { return new ItemAutousedEvent(*this); }
 
 	private:
 		const std::vector<uint32_t> m_AutouseInfo;

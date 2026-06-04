@@ -16,5 +16,6 @@ namespace L2Bot::Domain::Events
 
 		OnEndItemListEvent() = default;
 		virtual ~OnEndItemListEvent() = default;
+		Event* Clone() const override { return new OnEndItemListEvent(*this); }
 	};
 }

@@ -17,5 +17,6 @@ namespace L2Bot::Domain::Events
 
 		GameEngineTickedEvent() = default;
 		virtual ~GameEngineTickedEvent() = default;
+		Event* Clone() const override { return new GameEngineTickedEvent(*this); }
 	};
 }

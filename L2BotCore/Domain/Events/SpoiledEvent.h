@@ -17,5 +17,6 @@ namespace L2Bot::Domain::Events
 
 		SpoiledEvent() = default;
 		virtual ~SpoiledEvent() = default;
+		Event* Clone() const override { return new SpoiledEvent(*this); }
 	};
 }

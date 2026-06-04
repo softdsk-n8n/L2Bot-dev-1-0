@@ -29,6 +29,7 @@ namespace L2Bot::Domain::Events
 
 		SkillCreatedEvent() = delete;
 		virtual ~SkillCreatedEvent() = default;
+		Event* Clone() const override { return new SkillCreatedEvent(*this); }
 
 	private:
 		const std::vector<int32_t> m_SkillInfo;

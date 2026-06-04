@@ -35,6 +35,7 @@ namespace L2Bot::Domain::Events
 
 		AttackedEvent() = delete;
 		virtual ~AttackedEvent() = default;
+		Event* Clone() const override { return new AttackedEvent(*this); }
 
 	private:
 		const uint32_t m_AttackerId;

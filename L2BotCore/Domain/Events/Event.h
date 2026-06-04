@@ -8,6 +8,7 @@ namespace L2Bot::Domain::Events
 	{
 	public:
 		virtual const std::string GetName() const = 0;
+		virtual Event* Clone() const = 0;
 
 		Event() = default;
 		virtual ~Event() = default;

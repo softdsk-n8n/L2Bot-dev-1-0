@@ -35,6 +35,7 @@ namespace L2Bot::Domain::Events
 
 		CreatureDiedEvent() = delete;
 		virtual ~CreatureDiedEvent() = default;
+		Event* Clone() const override { return new CreatureDiedEvent(*this); }
 
 	private:
 		const uint32_t m_CreatureId;

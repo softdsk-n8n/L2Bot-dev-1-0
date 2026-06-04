@@ -28,6 +28,7 @@ namespace L2Bot::Domain::Events
 
 		SkillCancelledEvent() = delete;
 		virtual ~SkillCancelledEvent() = default;
+		Event* Clone() const override { return new SkillCancelledEvent(*this); }
 
 	private:
 		const uint32_t m_InitiatorId;

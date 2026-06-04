@@ -1,8 +1,9 @@
 #pragma once
 
 #include <vector>
-#include <format>
 #include <memory>
+#include <string>
+#include <stdarg.h>
 #include "LogChannel.h"
 #include "LogLevel.h"
 
@@ -15,22 +16,22 @@ namespace L2Bot::Domain::Logger
 		virtual ~Logger() = default;
 
 		template <class ... Args>
-		void Error(const std::wformat_string<Args...> format, Args... args) const
+		void Error(const std::wstring& format, Args... args) const
 		{
 			Log(LogLevel::error, format, args...);
 		}
 		template <class ... Args>
-		void Warning(const std::wformat_string<Args...> format, Args... args) const
+		void Warning(const std::wstring& format, Args... args) const
 		{
 			Log(LogLevel::warning, format, args...);
 		}
 		template <class ... Args>
-		void Info(const std::wformat_string<Args...> format, Args... args) const
+		void Info(const std::wstring& format, Args... args) const
 		{
 			Log(LogLevel::info, format, args...);
 		}
 		template <class ... Args>
-		void App(const std::wformat_string<Args...> format, Args... args) const
+		void App(const std::wstring& format, Args... args) const
 		{
 			Log(LogLevel::app, format, args...);
 		}
@@ -54,9 +55,11 @@ namespace L2Bot::Domain::Logger
 
 	private:
 		template <class ... Args>
-		void Log(LogLevel level, const std::wformat_string<Args...> format, Args... args) const
+		void Log(LogLevel level, const std::wstring& format, Args... args) const
 		{
-			Log(level, std::vformat(format.get(), std::make_wformat_args(args...)));
+			wchar_t buf[4096];
+			_swprintf_c(buf, _TRUNCATE, format.c_str(), args...);
+			Log(level, std::wstring(buf));
 		}
 		void Log(LogLevel level, const std::wstring& message) const
 		{
