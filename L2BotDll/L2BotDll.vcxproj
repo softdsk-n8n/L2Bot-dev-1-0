@@ -102,6 +102,7 @@
       <SubSystem>Windows</SubSystem>
       <GenerateDebugInformation>true</GenerateDebugInformation>
       <EnableUAC>false</EnableUAC>
+      <AdditionalDependencies>ws2_32.lib;%(AdditionalDependencies)</AdditionalDependencies>
     </Link>
   </ItemDefinitionGroup>
   <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">
@@ -116,7 +117,8 @@
       <PrecompiledHeaderFile>pch.h</PrecompiledHeaderFile>
       <LanguageStandard>stdcpp20</LanguageStandard>
       <LanguageStandard_C>stdc17</LanguageStandard_C>
-      <AdditionalIncludeDirectories>D:\Lineage 2 bot\Bot 2.0\L2Bot\InjectionLibrary;D:\Lineage 2 bot\Bot 2.0\L2Bot\L2BotCore;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <AdditionalIncludeDirectories>..\InjectionLibrary;..\L2BotCore;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <RuntimeLibrary>MultiThreaded</RuntimeLibrary>
     </ClCompile>
     <Link>
       <SubSystem>Windows</SubSystem>
@@ -124,6 +126,7 @@
       <OptimizeReferences>true</OptimizeReferences>
       <GenerateDebugInformation>true</GenerateDebugInformation>
       <EnableUAC>false</EnableUAC>
+      <AdditionalDependencies>ws2_32.lib;%(AdditionalDependencies)</AdditionalDependencies>
     </Link>
   </ItemDefinitionGroup>
   <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">
@@ -171,6 +174,7 @@
     <ClInclude Include="Serializers\JsonIncomingMessageFactory.h" />
     <ClInclude Include="Serializers\JsonSerializer.h" />
     <ClInclude Include="Versions\Interlude\Services\HeroService.h" />
+    <ClCompile Include="Versions\Interlude\Services\HeroService.cpp" />
     <ClInclude Include="ThirdParty\json.hpp" />
     <ClInclude Include="Versions\GameStructs\FNameInterface.h" />
     <ClInclude Include="Versions\GameStructs\GameEngineInterface.h" />
@@ -195,6 +199,8 @@
     <ClInclude Include="Versions\GameStructs\GameStructs.h" />
     <ClInclude Include="Transports\NamedPipe.h" />
     <ClInclude Include="Transports\NamedPipeTransport.h" />
+    <ClInclude Include="Transports\TcpSocket.h" />
+    <ClInclude Include="Transports\TcpSocketTransport.h" />
     <ClInclude Include="pch.h" />
     <ClInclude Include="Versions\Interlude\GameStructs\GameStructs.h" />
     <ClInclude Include="Versions\Interlude\GameStructs\L2ParamStack.h" />

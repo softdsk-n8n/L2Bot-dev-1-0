@@ -5,11 +5,21 @@
 #include "../GameStructs/NetworkHandlerWrapper.h"
 #include "../GameStructs/L2GameDataWrapper.h"
 #include "Domain/Enums/RestartPointTypeEnum.h"
+#include <functional>
+#include <vector>
+#include <mutex>
 
 using namespace L2Bot::Domain;
 
 namespace Interlude
 {
+	// Global command queue — Receive thread enqueues game commands,
+	// Send thread executes them after StartCurrentProcess when L2
+	// threads are running. This prevents crashes from calling MTL/Action
+	// while L2 threads are frozen by StopCurrentProcess.
+	extern std::mutex g_CommandMutex;
+	extern std::vector<std::function<void()>> g_CommandQueue;
+
 	class HeroService : public Services::HeroServiceInterface
 	{
 	public:
@@ -27,14 +37,17 @@ namespace Interlude
 		{
 			auto hero = m_NetworkHandler.GetHero();
 			
-			if (hero) {
-				m_NetworkHandler.MTL(
-					hero->pawn,
-					{ location.GetX(), location.GetY(), location.GetZ() },
-					hero->pawn->Location,
-					hero->pawn->terrainInfo,
-					0
-				);
+			if (hero && hero->pawn) {
+				auto pawn = hero->pawn;
+				L2::FVector dest = { location.GetX(), location.GetY(), location.GetZ() };
+				L2::FVector src = pawn->Location;
+				void* terrain = pawn->terrainInfo;
+				auto& nh = m_NetworkHandler;
+
+				std::lock_guard<std::mutex> lock(g_CommandMutex);
+				g_CommandQueue.push_back([&nh, pawn, dest, src, terrain]() {
+					nh.MTL(pawn, dest, src, terrain, 0);
+				});
 			}
 		}
 
@@ -42,14 +55,19 @@ namespace Interlude
 		{
 			auto target = m_NetworkHandler.GetUser(objectId);
 
-			if (target) {
+			if (target && target->pawn) {
 				auto currentTargetId = 0;
 				auto hero = m_NetworkHandler.GetHero();
 				if (hero && hero->pawn && hero->pawn->lineagePlayerController) {
 					currentTargetId = hero->pawn->lineagePlayerController->targetObjectId;
 				}
 				if (currentTargetId != objectId) {
-					m_NetworkHandler.Action(objectId, target->pawn->Location, 0);
+					L2::FVector loc = target->pawn->Location;
+					auto& nh = m_NetworkHandler;
+					std::lock_guard<std::mutex> lock(g_CommandMutex);
+					g_CommandQueue.push_back([&nh, objectId, loc]() {
+						nh.Action(objectId, loc, 0);
+					});
 				}
 			}
 		}
@@ -58,11 +76,16 @@ namespace Interlude
 		{
 			auto target = m_NetworkHandler.GetUser(objectId);
 
-			if (target) {
-				// Acquire target
-				m_NetworkHandler.Action(objectId, target->pawn->Location, 0);
-				// Attack
-				m_NetworkHandler.Action(objectId, target->pawn->Location, 0);
+			if (target && target->pawn) {
+				L2::FVector loc = target->pawn->Location;
+				auto& nh = m_NetworkHandler;
+				std::lock_guard<std::mutex> lock(g_CommandMutex);
+				g_CommandQueue.push_back([&nh, objectId, loc]() {
+					nh.Action(objectId, loc, 0);
+				});
+				g_CommandQueue.push_back([&nh, objectId, loc]() {
+					nh.Action(objectId, loc, 0);
+				});
 			}
 		}
 
@@ -70,8 +93,13 @@ namespace Interlude
 		{
 			auto target = m_NetworkHandler.GetItem(objectId);
 
-			if (target) {
-				m_NetworkHandler.Action(objectId, target->pawn->Location, 0);
+			if (target && target->pawn) {
+				L2::FVector loc = target->pawn->Location;
+				auto& nh = m_NetworkHandler;
+				std::lock_guard<std::mutex> lock(g_CommandMutex);
+				g_CommandQueue.push_back([&nh, objectId, loc]() {
+					nh.Action(objectId, loc, 0);
+				});
 			}
 		}
 

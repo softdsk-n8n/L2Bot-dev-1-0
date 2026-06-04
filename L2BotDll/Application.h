@@ -38,8 +38,14 @@ public:
 
 	void Start()
 	{
+		OutputDebugStringA("[L2Bot] Application::Start Init()\n");
+		Services::ServiceLocator::GetInstance().GetLogger()->Info(L"Application::Start — calling Init()");
 		Init();
+		OutputDebugStringA("[L2Bot] Application::Start m_WorldHandler.Start()\n");
+		Services::ServiceLocator::GetInstance().GetLogger()->Info(L"Application::Start — calling WorldHandler.Start()");
 		m_WorldHandler.Start();
+		OutputDebugStringA("[L2Bot] Application::Start done\n");
+		Services::ServiceLocator::GetInstance().GetLogger()->Info(L"Application::Start — ALL DONE, bot running");
 	}
 
 	void Stop()
@@ -57,11 +63,16 @@ private:
 
 		HMODULE hEngine = GetModuleHandleA("Engine.dll");
 		HMODULE hCore = GetModuleHandleA("Core.dll");
+		OutputDebugStringA("[L2Bot] Application::Init hooks starting\n");
 
 		m_AbstractFactory.GetNetworkHandler().Init(hEngine);
+		OutputDebugStringA("[L2Bot] NetworkHandler Init done\n");
 		m_AbstractFactory.GetGameEngine().Init(hEngine);
+		OutputDebugStringA("[L2Bot] GameEngine Init done\n");
 		m_AbstractFactory.GetL2GameData().Init(hEngine);
+		OutputDebugStringA("[L2Bot] L2GameData Init done\n");
 		m_AbstractFactory.GetFName().Init(hCore);
+		OutputDebugStringA("[L2Bot] FName Init done\n");
 	}
 
 private:
