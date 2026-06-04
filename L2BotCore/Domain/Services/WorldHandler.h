@@ -12,6 +12,13 @@
 #include "../Services/OutgoingMessageBuilder.h"
 #include "../Exceptions.h"
 #include "../Services/ServiceLocator.h"
+#include "../../../InjectionLibrary/ProcessManipulation.h"
+#include "../../../L2BotDll/Versions/Interlude/Services/HeroService.h"
+#include <set>
+#include <mutex>
+#include <functional>
+#include <vector>
+#include <atomic>
 
 namespace L2Bot::Domain::Services
 {
@@ -42,6 +49,10 @@ namespace L2Bot::Domain::Services
 			m_ConnectingThread = std::thread(&WorldHandler::Connect, this);
 			m_SendingThread = std::thread(&WorldHandler::Send, this);
 			m_ReceivingThread = std::thread(&WorldHandler::Receive, this);
+
+			m_ExcludeThreadIds.insert(GetThreadId(m_SendingThread.native_handle()));
+			m_ExcludeThreadIds.insert(GetThreadId(m_ConnectingThread.native_handle()));
+			m_ExcludeThreadIds.insert(GetThreadId(m_ReceivingThread.native_handle()));
 		}
 
 		void Stop()
@@ -66,31 +77,105 @@ namespace L2Bot::Domain::Services
 	private:
 		void Send()
 		{
+			static int sendTick = 0;
 			while (!m_Stopped)
 			{
 				try {
+					++sendTick;
+
+					// If Client just connected, force a full entity dump
+					// by resetting hash cache IN the Send thread (no race).
+					if (m_NeedFullDump.load())
+					{
+						m_OutgoingMessageBuilder.Reset();
+						m_NeedFullDump.store(false);
+						FILE* f = nullptr;
+						errno_t err = _wfopen_s(&f, L"E:\\L2Teon\\system\\bot_status.log", L"a");
+						if (err == 0 && f) { fprintf(f, "[DUMP] Reset done, m_NeedFullDump cleared\n"); fflush(f); fclose(f); }
+					}
+
 					const auto& messages = GetOutgoingMessages();
+
+					// Debug: log first few ticks after connect to diagnose msgs=0
+					{
+						static bool wasDisconnected = true;
+						static int debugTicks = 0;
+						if (m_Transport.IsConnected() && wasDisconnected) {
+							debugTicks = 10; // log next 10 ticks
+							wasDisconnected = false;
+						}
+						if (!m_Transport.IsConnected()) {
+							wasDisconnected = true;
+						}
+						if (debugTicks > 0) {
+							--debugTicks;
+							FILE* f = nullptr;
+							errno_t err = _wfopen_s(&f, L"E:\\L2Teon\\system\\bot_status.log", L"a");
+							if (err == 0 && f) {
+								fprintf(f, "[DEBUG] tick=%d msgs=%d connected=%d needDump=%d\n",
+									sendTick, (int)messages.size(), m_Transport.IsConnected() ? 1 : 0,
+									m_NeedFullDump.load() ? 1 : 0);
+								fflush(f); fclose(f);
+							}
+						}
+					}
+
+					// Execute queued game commands (Move, Attack, etc.)
+					std::vector<std::function<void()>> commands;
+					{
+						std::lock_guard<std::mutex> cmdLock(Interlude::g_CommandMutex);
+						Interlude::g_CommandQueue.swap(commands);
+					}
+					for (const auto& cmd : commands) {
+						cmd();
+					}
 
 					if (m_Transport.IsConnected())
 					{
 						for (const auto& message : messages)
 						{
-							m_Transport.Send(
-								m_Serializer.Serialize(message)
-							);
+							const auto serialized = m_Serializer.Serialize(message);
+							m_Transport.Send(serialized);
 						}
 					}
 
-					std::this_thread::sleep_for(std::chrono::milliseconds(50));
+					// Write status log every 20 ticks
+					if (sendTick % 20 == 0) {
+						FILE* f = nullptr;
+						errno_t err = _wfopen_s(&f, L"E:\\L2Teon\\system\\bot_status.log", L"a");
+						if (err == 0 && f) {
+							fprintf(f, "[STATUS] tick=%d msgs=%d cmds=%d connected=%d\n",
+								sendTick, (int)messages.size(), (int)commands.size(),
+								m_Transport.IsConnected() ? 1 : 0);
+							fflush(f); fclose(f);
+						}
+					}
+
+					std::this_thread::sleep_for(std::chrono::milliseconds(100));
 				}
+				// Client disconnect causes pipe errors — NOT fatal.
+				// The pipe code sets IsConnected=false, Connect thread
+				// will wait for a new Client. Do NOT set m_Stopped=true.
 				catch (const CriticalRuntimeException& e)
 				{
-					m_Stopped = true;
-					ServiceLocator::GetInstance().GetLogger()->Error(e.Message());
+					// Only truly fatal if we're NOT connected anymore
+					// (pipe error = client gone, recoverable)
+					if (!m_Transport.IsConnected()) {
+						ServiceLocator::GetInstance().GetLogger()->Warning(
+							L"Send: pipe error (client disconnected?): " + e.Message());
+						// Don't stop — wait for reconnect
+					} else {
+						// Still connected but got critical error — truly fatal
+						m_Stopped = true;
+						ServiceLocator::GetInstance().GetLogger()->Error(e.Message());
+					}
 				}
 				catch (const RuntimeException& e)
 				{
 					ServiceLocator::GetInstance().GetLogger()->Warning(e.Message());
+				}
+				catch (...)
+				{
 				}
 			}
 		}
@@ -103,19 +188,29 @@ namespace L2Bot::Domain::Services
 					if (m_Transport.IsConnected())
 					{
 						const auto& message = m_Transport.Receive();
-						ServiceLocator::GetInstance().GetLogger()->Info(L"received message from client: {}", message);
-						const auto messageType = m_IncomingMessageProcessor.Process(message);
+						if (!message.empty()) {
+							const auto messageType = m_IncomingMessageProcessor.Process(message);
 
-						if (messageType == Serializers::IncomingMessage::Type::invalidate) {
-							Invalidate();
+							if (messageType == Serializers::IncomingMessage::Type::invalidate) {
+								Invalidate();
+							}
 						}
 					}
 					std::this_thread::sleep_for(std::chrono::milliseconds(50));
 				}
+				// Client disconnect causes ERROR_BROKEN_PIPE — NOT fatal.
+				// The pipe code sets IsConnected=false, Connect thread
+				// will accept a new Client connection.
 				catch (const CriticalRuntimeException& e)
 				{
-					m_Stopped = true;
-					ServiceLocator::GetInstance().GetLogger()->Error(e.Message());
+					if (!m_Transport.IsConnected()) {
+						ServiceLocator::GetInstance().GetLogger()->Warning(
+							L"Receive: pipe error (client disconnected?): " + e.Message());
+						// Don't stop — wait for reconnect
+					} else {
+						m_Stopped = true;
+						ServiceLocator::GetInstance().GetLogger()->Error(e.Message());
+					}
 				}
 				catch (const RuntimeException& e)
 				{
@@ -132,13 +227,25 @@ namespace L2Bot::Domain::Services
 					if (!m_Transport.IsConnected())
 					{
 						m_Transport.Connect();
+						// Signal Send thread to do a full entity dump
+						// on its next iteration. We set the flag here
+						// but the actual Reset() happens in Send thread
+						// to avoid race condition with GetOutgoingMessages().
+						m_NeedFullDump.store(true);
 					}
 					std::this_thread::sleep_for(std::chrono::milliseconds(50));
 				}
 				catch (const CriticalRuntimeException& e)
 				{
-					m_Stopped = true;
-					ServiceLocator::GetInstance().GetLogger()->Error(e.Message());
+					if (!m_Transport.IsConnected()) {
+						// Connection failed — not fatal, try again
+						ServiceLocator::GetInstance().GetLogger()->Warning(
+							L"Connect: failed (will retry): " + e.Message());
+						std::this_thread::sleep_for(std::chrono::milliseconds(500));
+					} else {
+						m_Stopped = true;
+						ServiceLocator::GetInstance().GetLogger()->Error(e.Message());
+					}
 				}
 				catch (const RuntimeException& e)
 				{
@@ -153,10 +260,13 @@ namespace L2Bot::Domain::Services
 
 			for (const auto& kvp : m_Repositories)
 			{
-				auto& entities = kvp.second.GetEntities();
-
-				const auto& messages = m_OutgoingMessageBuilder.Build(kvp.first, entities);
-				result.insert(result.end(), messages.begin(), messages.end());
+				try {
+					auto& entities = kvp.second.GetEntities();
+					const auto& messages = m_OutgoingMessageBuilder.Build(kvp.first, entities);
+					result.insert(result.end(), messages.begin(), messages.end());
+				} catch (const std::exception&) {
+				} catch (...) {
+				}
 			}
 
 			return result;
@@ -168,6 +278,7 @@ namespace L2Bot::Domain::Services
 			{
 				kvp.second.Reset();
 			}
+			m_OutgoingMessageBuilder.Reset();
 		}
 
 	private:
@@ -177,10 +288,12 @@ namespace L2Bot::Domain::Services
 		Services::OutgoingMessageBuilder m_OutgoingMessageBuilder;
 
 		Transports::TransportInterface& m_Transport;
-		bool m_Stopped = false;
+		volatile bool m_Stopped = false;
+		std::atomic<bool> m_NeedFullDump{false};
 		std::thread m_ConnectingThread;
 		std::thread m_SendingThread;
 		std::thread m_ReceivingThread;
+		std::set<DWORD> m_ExcludeThreadIds;
 	};
 
 }

@@ -17,6 +17,11 @@ namespace L2Bot::Domain::Services
 		OutgoingMessageBuilder() = default;
 		virtual ~OutgoingMessageBuilder() = default;
 
+		void Reset()
+		{
+			m_Hashes.clear();
+		}
+
 		const std::vector <std::vector<Serializers::Node>> Build(const std::wstring& name, const std::unordered_map<uint32_t, std::shared_ptr<Entities::EntityInterface>>& entities)
 		{
 			std::vector <std::vector<Serializers::Node>> result;
