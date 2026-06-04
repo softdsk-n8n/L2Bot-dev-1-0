@@ -119,9 +119,7 @@ namespace Client
 
                 .AddSingleton(
                     typeof(PathfinderInterface),
-                    x => new L2jGeoDataPathfinder(
-                        config.GetValue<string>("GeoDataDirectory") ?? ""
-                    )
+                    x => new SimplePathfinder()
                  )
                 .AddSingleton(
                     typeof(AsyncPathMoverInterface),

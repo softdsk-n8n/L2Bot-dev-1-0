@@ -31,6 +31,11 @@ namespace Client.Domain.AI
             IsEnabled = !IsEnabled;
             if (IsEnabled)
             {
+                // Auto-set combat zone center to hero position if zone center is at origin (0,0,0)
+                if (worldHandler.Hero != null && config.Combat.Zone.Center.X == 0 && config.Combat.Zone.Center.Y == 0)
+                {
+                    config.Combat.Zone.Center = worldHandler.Hero.Transform.Position;
+                }
                 ResetState();
             }
         }

@@ -47,14 +47,20 @@ namespace Client
 
         public async Task StartAsync()
         {
+            // Try to load the DLL - but don't fail if it can't load.
+            // The DLL may already be injected into L2.exe by an external injector.
+            // In that case, LoadLibrary into Client.exe would fail (no Engine.dll here)
+            // but the Named Pipe connection still works.
             int hDll = LoadLibrary(dllName);
 
             if (hDll == 0)
             {
-                throw new Exception("Unable to load library " + dllName + ": " + Marshal.GetLastWin32Error().ToString());
+                Debug.WriteLine(dllName + " could not be loaded into Client process (this is OK if DLL is already injected into L2.exe): " + Marshal.GetLastWin32Error());
             }
-
-            Debug.WriteLine(dllName + " loaded\n");
+            else
+            {
+                Debug.WriteLine(dllName + " loaded into Client process\n");
+            }
             transport.Message += OnMessage;
 
             SubscribeAllHandlers();

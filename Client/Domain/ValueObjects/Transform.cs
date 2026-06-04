@@ -10,18 +10,34 @@ namespace Client.Domain.ValueObjects
         private Vector3 velocity;
         private Vector3 acceleration;
 
-        public Vector3 Position { get => position; set { if (value != position) { position = value; OnPropertyChanged(); } } }
-        public Vector3 Rotation {
+        public Vector3 Position
+        {
+            get => position;
+            set
+            {
+                // Always propagate — PopulateObject creates new Vector3 instances,
+                // so reference comparison is unreliable. Update X/Y/Z on existing
+                // Vector3 to preserve PropertyChanged subscribers.
+                position.X = value.X;
+                position.Y = value.Y;
+                position.Z = value.Z;
+                OnPropertyChanged();
+            }
+        }
+        public Vector3 Rotation
+        {
             get => rotation;
             set
             {
                 if (value != rotation)
                 {
-                    rotation = value;
+                    rotation.X = value.X;
+                    rotation.Y = value.Y;
+                    rotation.Z = value.Z;
                     OnPropertyChanged();
                     OnPropertyChanged("Direction");
                 }
-            } 
+            }
         }
 
         private void Rotation_PropertyChanged(object? sender, System.ComponentModel.PropertyChangedEventArgs e)
@@ -32,8 +48,34 @@ namespace Client.Domain.ValueObjects
             }
         }
 
-        public Vector3 Velocity { get => velocity; set { if (value != velocity) { velocity = value; OnPropertyChanged(); } } }
-        public Vector3 Acceleration { get => acceleration; set { if (value != acceleration) { acceleration = value; OnPropertyChanged(); } } }
+        public Vector3 Velocity
+        {
+            get => velocity;
+            set
+            {
+                if (value != velocity)
+                {
+                    velocity.X = value.X;
+                    velocity.Y = value.Y;
+                    velocity.Z = value.Z;
+                    OnPropertyChanged();
+                }
+            }
+        }
+        public Vector3 Acceleration
+        {
+            get => acceleration;
+            set
+            {
+                if (value != acceleration)
+                {
+                    acceleration.X = value.X;
+                    acceleration.Y = value.Y;
+                    acceleration.Z = value.Z;
+                    OnPropertyChanged();
+                }
+            }
+        }
 
         public Vector3 Direction
         {

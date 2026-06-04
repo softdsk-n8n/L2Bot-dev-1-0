@@ -18,7 +18,18 @@ namespace Client.Domain.Entities
         private VitalStats vitalStats;
 
         public uint Id { get; set; }
-        public Transform Transform { get; set; }
+        private Transform transform;
+        public Transform Transform { get => transform; set { if (value != transform) { if (transform != null) { transform.PropertyChanged -= Transform_PropertyChanged; transform.Position.PropertyChanged -= TransformPosition_PropertyChanged; } transform = value; if (transform != null) { transform.PropertyChanged += Transform_PropertyChanged; transform.Position.PropertyChanged += TransformPosition_PropertyChanged; } OnPropertyChanged("Transform"); } } }
+
+        private void Transform_PropertyChanged(object? sender, System.ComponentModel.PropertyChangedEventArgs e)
+        {
+            OnPropertyChanged("Transform");
+        }
+
+        private void TransformPosition_PropertyChanged(object? sender, System.ComponentModel.PropertyChangedEventArgs e)
+        {
+            OnPropertyChanged("Transform");
+        }
         public FullName FullName
         {
             get => fullName;
