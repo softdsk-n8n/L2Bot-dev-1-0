@@ -7,6 +7,66 @@
 InjectLibrary::Injector injector("L2BotHookMutex", WH_GETMESSAGE);
 Application application(VersionAbstractFactory::Version::interlude);
 
+static HANDLE g_hInitThread = NULL;
+static bool g_isLineageProcess = false;
+
+void ConfigLogger(HMODULE hModule);
+
+// Helper: write to debug_init.log next to the DLL
+static void DbgTrace(const char* msg)
+{
+	FILE* f = nullptr;
+	errno_t err = _wfopen_s(&f, L"E:\\L2Teon\\system\\debug_init.log", L"a");
+	if (err == 0 && f) {
+		fprintf(f, "%s\n", msg);
+		fflush(f);
+		fclose(f);
+	}
+}
+
+static void DbgTraceFmt(const char* fmt, ...)
+{
+	char buf[512];
+	va_list args;
+	va_start(args, fmt);
+	vsnprintf_s(buf, sizeof(buf), _TRUNCATE, fmt, args);
+	va_end(args);
+	DbgTrace(buf);
+}
+
+// Run heavy initialization on a separate thread to avoid loader lock deadlock.
+// DllMain is called inside the loader lock — we MUST NOT create threads,
+// wait on objects, or create named pipes inside it.
+DWORD WINAPI InitThreadProc(LPVOID lpParam)
+{
+	// Give the loader lock time to release
+	Sleep(500);
+
+	HMODULE hModule = (HMODULE)lpParam;
+
+	DbgTrace("[1] InitThreadProc started");
+
+	const int processId = GetCurrentProcessId();
+	const std::string& processName = InjectLibrary::GetCurrentProcessName();
+	const bool isLineage = processName == "l2.exe" || processName == "l2.bin" || processName == "L2.exe" || processName == "L2.bin" || GetModuleHandleW(L"Engine.dll") != NULL;
+	DbgTraceFmt("[2] processName='%s' pid=%d isLineage=%d", processName.c_str(), processId, isLineage);
+	DbgTraceFmt("[3] Engine.dll handle=0x%p", GetModuleHandleW(L"Engine.dll"));
+
+	ConfigLogger(hModule);
+	DbgTrace("[4] ConfigLogger done");
+
+	InjectLibrary::StopCurrentProcess();
+	DbgTrace("[5] StopCurrentProcess done, calling application.Start()");
+
+	application.Start();
+	DbgTrace("[6] application.Start() returned");
+
+	InjectLibrary::StartCurrentProcess();
+	DbgTrace("[7] StartCurrentProcess done");
+
+	return 0;
+}
+
 void ConfigLogger(HMODULE hModule)
 {
 	wchar_t buf[MAX_PATH];
@@ -27,7 +87,8 @@ void ConfigLogger(HMODULE hModule)
 	channels.push_back(std::make_unique<FileLogChannel>(directory + L"\\app.log", std::vector<Logger::LogLevel>{
 #ifndef _DEBUG
 		Logger::LogLevel::error,
-		Logger::LogLevel::warning
+		Logger::LogLevel::warning,
+		Logger::LogLevel::info
 #endif
 	}));
 	channels.push_back(std::make_unique<ChatLogChannel>(Enums::ChatChannelEnum::log, std::vector<Logger::LogLevel>{
@@ -44,27 +105,31 @@ BOOL APIENTRY DllMain(HMODULE hModule,
 	const int processId = GetCurrentProcessId();
 	const std::string& processName = InjectLibrary::GetCurrentProcessName();
 
-	const bool isLineageProcess = processName == "l2.exe" || processName == "l2.bin";
+	const bool isLineageProcess = processName == "l2.exe" || processName == "l2.bin" || processName == "L2.exe" || processName == "L2.bin" || GetModuleHandleW(L"Engine.dll") != NULL;
 
 	switch (ul_reason_for_call)
 	{
 	case DLL_PROCESS_ATTACH:
+		DbgTraceFmt("[DllMain] ATTACH processName='%s' isLineage=%d Engine=0x%p", processName.c_str(), isLineageProcess, GetModuleHandleW(L"Engine.dll"));
 		injector.SetHook(hModule);
 		if (isLineageProcess) {
-			ConfigLogger(hModule);
-
-			InjectLibrary::StopCurrentProcess();
-			application.Start();
-			InjectLibrary::StartCurrentProcess();
-			Services::ServiceLocator::GetInstance().GetLogger()->Info(L"attached to Lineage 2 client {:#010x}", processId);
+			g_isLineageProcess = true;
+			g_hInitThread = CreateThread(NULL, 0, InitThreadProc, hModule, 0, NULL);
+			DbgTraceFmt("[DllMain] InitThread created handle=0x%p", g_hInitThread);
+		} else {
+			DbgTrace("[DllMain] NOT a Lineage process — skipping init");
 		}
 		break;
 	case DLL_PROCESS_DETACH:
-		if (isLineageProcess) {
-			InjectLibrary::StopCurrentProcess();
+		if (g_isLineageProcess) {
+			// Don't use StopCurrentProcess here — it would suspend our
+			// own Send/Receive/Connect threads, causing deadlock when
+			// application.Stop() tries to join them.
 			application.Stop();
-			InjectLibrary::StartCurrentProcess();
-			Services::ServiceLocator::GetInstance().GetLogger()->Info(L"detached from Lineage 2 client {:#010x}", processId);
+		}
+		if (g_hInitThread) {
+			WaitForSingleObject(g_hInitThread, 3000);
+			CloseHandle(g_hInitThread);
 		}
 		injector.SetHook();
 		break;
