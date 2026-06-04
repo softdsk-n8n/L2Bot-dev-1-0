@@ -33,10 +33,6 @@ namespace InjectLibrary
 
 			_hookHandle = SetWindowsHookExA(_windowsMessage, (HOOKPROC)HookMessageProcedure, moduleHandle, 0);
 			_mutexHandle = CreateMutexA(nullptr, false, _mutexName.c_str());
-
-			FILE* f = nullptr;
-			errno_t ferr = _wfopen_s(&f, L"E:\\L2Teon\\system\\debug_init.log", L"a");
-			if (ferr == 0 && f) { fprintf(f, "[SetHook] hookHandle=0x%p mutexHandle=0x%p\n", _hookHandle, _mutexHandle); fflush(f); fclose(f); }
 		}
 		else {
 			UnhookWindowsHookEx(_hookHandle);

@@ -89,36 +89,9 @@ namespace L2Bot::Domain::Services
 					{
 						m_OutgoingMessageBuilder.Reset();
 						m_NeedFullDump.store(false);
-						FILE* f = nullptr;
-						errno_t err = _wfopen_s(&f, L"E:\\L2Teon\\system\\bot_status.log", L"a");
-						if (err == 0 && f) { fprintf(f, "[DUMP] Reset done, m_NeedFullDump cleared\n"); fflush(f); fclose(f); }
 					}
 
 					const auto& messages = GetOutgoingMessages();
-
-					// Debug: log first few ticks after connect to diagnose msgs=0
-					{
-						static bool wasDisconnected = true;
-						static int debugTicks = 0;
-						if (m_Transport.IsConnected() && wasDisconnected) {
-							debugTicks = 10; // log next 10 ticks
-							wasDisconnected = false;
-						}
-						if (!m_Transport.IsConnected()) {
-							wasDisconnected = true;
-						}
-						if (debugTicks > 0) {
-							--debugTicks;
-							FILE* f = nullptr;
-							errno_t err = _wfopen_s(&f, L"E:\\L2Teon\\system\\bot_status.log", L"a");
-							if (err == 0 && f) {
-								fprintf(f, "[DEBUG] tick=%d msgs=%d connected=%d needDump=%d\n",
-									sendTick, (int)messages.size(), m_Transport.IsConnected() ? 1 : 0,
-									m_NeedFullDump.load() ? 1 : 0);
-								fflush(f); fclose(f);
-							}
-						}
-					}
 
 					// Execute queued game commands (Move, Attack, etc.)
 					std::vector<std::function<void()>> commands;
