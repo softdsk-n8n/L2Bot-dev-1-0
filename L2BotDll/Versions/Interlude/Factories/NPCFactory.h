@@ -70,7 +70,7 @@ namespace Interlude
 					ValueObjects::Vector3(item->pawn->Velocity.x, item->pawn->Velocity.y, item->pawn->Velocity.z),
 					ValueObjects::Vector3(item->pawn->Acceleration.x, item->pawn->Acceleration.y, item->pawn->Acceleration.z)
 				),
-				item->isMob != 0,
+				item->IsMonster(),
 				item->npcId,
 				ValueObjects::FullName(
 					std::wstring(item->nickname),

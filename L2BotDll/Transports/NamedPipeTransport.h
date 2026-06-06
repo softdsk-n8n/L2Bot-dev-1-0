@@ -5,6 +5,7 @@
 #include "../Common/Common.h"
 #include "Domain/Services/ServiceLocator.h"
 
+
 using namespace L2Bot::Domain;
 
 	class NamedPipeTransport : public Transports::TransportInterface
@@ -20,6 +21,11 @@ public:
 		const auto mainPipeName = GenerateUUID();
 		m_ConnectionPipe.Send(mainPipeName);
 		m_ConnectionPipe.Flush();
+		// Give the Client time to read the UUID before we disconnect.
+		// Without this delay, DisconnectNamedPipe() in Close() destroys
+		// the pipe before Client's synchronous Read() completes, causing
+		// Read() to return 0 bytes → empty pipeName → handshake fails.
+		Sleep(2000);
 		m_ConnectionPipe.Close();
 
 		if (!m_Pipe.Connect(mainPipeName))

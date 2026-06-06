@@ -63,5 +63,12 @@ extern "C" __declspec(dllexport) int __cdecl HasLineOfSight(
     float endX, float endY,
     unsigned short maxPassableHeight)
 {
-    return 1;
+    // Stub: approximate visibility check by horizontal distance.
+    // Without real geodata, assume mobs within 300 units horizontally
+    // are likely visible (not behind walls). This prevents the bot
+    // from targeting distant mobs through multiple walls.
+    float dx = endX - startX;
+    float dy = endY - startY;
+    float horizontalDistSq = dx * dx + dy * dy;
+    return horizontalDistSq <= 300.0f * 300.0f ? 1 : 0;
 }

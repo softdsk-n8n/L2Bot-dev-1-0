@@ -11,6 +11,7 @@ namespace Client.Domain.Helpers
     {
         uint GetLevel(uint id);
         uint GetAggroRadius(uint id);
+        bool IsGuard(uint id);
         List<NpcInfo> GetAllNpc();
     }
 }

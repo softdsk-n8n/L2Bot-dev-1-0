@@ -89,9 +89,24 @@ namespace L2Bot::Domain::Services
 					{
 						m_OutgoingMessageBuilder.Reset();
 						m_NeedFullDump.store(false);
+						FILE* f = nullptr;
+						errno_t err = _wfopen_s(&f, L"E:\\L2Teon\\system\\bot_status.log", L"a");
+						if (err == 0 && f) { fprintf(f, "[DUMP] Reset done, needDump cleared\n"); fflush(f); fclose(f); }
 					}
 
 					const auto& messages = GetOutgoingMessages();
+
+					// Temp debug: log when msgs appear or when still 0 after dump
+					if (sendTick % 20 == 0) {
+						FILE* f = nullptr;
+						errno_t err = _wfopen_s(&f, L"E:\\L2Teon\\system\\bot_status.log", L"a");
+						if (err == 0 && f) {
+							fprintf(f, "[DEBUG] tick=%d msgs=%d connected=%d needDump=%d repos=%d\n",
+								sendTick, (int)messages.size(), m_Transport.IsConnected() ? 1 : 0,
+								m_NeedFullDump.load() ? 1 : 0, (int)m_Repositories.size());
+							fflush(f); fclose(f);
+						}
+					}
 
 					// Execute queued game commands (Move, Attack, etc.)
 					std::vector<std::function<void()>> commands;
@@ -231,14 +246,39 @@ namespace L2Bot::Domain::Services
 		{
 			std::vector<std::vector<Serializers::Node>> result;
 
+			// Diagnostic: log entity counts per repo periodically
+			static int logCounter = 0;
+			bool doLog = (++logCounter % 50 == 1); // every 50 ticks
+
 			for (const auto& kvp : m_Repositories)
 			{
 				try {
 					auto& entities = kvp.second.GetEntities();
+					int entityCount = (int)entities.size();
 					const auto& messages = m_OutgoingMessageBuilder.Build(kvp.first, entities);
+					int msgCount = (int)messages.size();
 					result.insert(result.end(), messages.begin(), messages.end());
-				} catch (const std::exception&) {
+					
+					if (doLog) {
+						FILE* f = nullptr;
+						errno_t err = _wfopen_s(&f, L"E:\\L2Teon\\system\\bot_status.log", L"a");
+						if (err == 0 && f) {
+							fwprintf(f, L"[GETMSGS] repo=%s entities=%d msgs=%d\n", kvp.first.c_str(), entityCount, msgCount);
+							fflush(f); fclose(f);
+						}
+					}
+				} catch (const std::exception& e) {
+					FILE* f = nullptr;
+					errno_t err = _wfopen_s(&f, L"E:\\L2Teon\\system\\bot_status.log", L"a");
+					if (err == 0 && f) { fprintf(f, "[GETMSGS] std::exception in repo: %s\n", e.what()); fflush(f); fclose(f); }
+				} catch (const RuntimeException& e) {
+					FILE* f = nullptr;
+					errno_t err = _wfopen_s(&f, L"E:\\L2Teon\\system\\bot_status.log", L"a");
+					if (err == 0 && f) { fwprintf(f, L"[GETMSGS] RuntimeException: %s\n", e.Message().c_str()); fflush(f); fclose(f); }
 				} catch (...) {
+					FILE* f = nullptr;
+					errno_t err = _wfopen_s(&f, L"E:\\L2Teon\\system\\bot_status.log", L"a");
+					if (err == 0 && f) { fprintf(f, "[GETMSGS] unknown exception in repo\n"); fflush(f); fclose(f); }
 				}
 			}
 

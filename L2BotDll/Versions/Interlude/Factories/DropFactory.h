@@ -65,19 +65,16 @@ namespace Interlude
 		const Data GetData(const Item* item) const
 		{
 			const auto itemData = m_L2GameData.GetItemData(item->itemId);
-			if (!itemData) {
-				throw RuntimeException(std::format(L"cannot load ItemData for drop {}", item->itemId));
-			}
-			const auto nameEntry = m_FName.GetEntry(itemData->nameIndex);
-			const auto iconEntry = m_FName.GetEntry(itemData->iconNameIndex);
+			// GetItemData may return null when _target not captured (Init hook timing).
+			// Don't crash — empty name/icon is fine for pickup; only objectId+position matter.
+			const auto nameEntry = itemData ? m_FName.GetEntry(itemData->nameIndex) : nullptr;
+			const auto iconEntry = itemData ? m_FName.GetEntry(itemData->iconNameIndex) : nullptr;
 
-			if (!item->pawn) {
-				throw RuntimeException(std::format(L"pawn is empty for drop {}", std::wstring(nameEntry->value)));
-			}
-
-			return {
-				item->objectId,
-				ValueObjects::Transform(
+			ValueObjects::Transform transform;
+			
+			if (item->pawn) {
+				// Normal path: position from pawn->Location
+				transform = ValueObjects::Transform(
 					ValueObjects::Vector3(item->pawn->Location.x, item->pawn->Location.y, item->pawn->Location.z),
 					ValueObjects::Vector3(
 						static_cast<float_t>(item->pawn->Rotation.Pitch),
@@ -86,7 +83,28 @@ namespace Interlude
 					),
 					ValueObjects::Vector3(item->pawn->Velocity.x, item->pawn->Velocity.y, item->pawn->Velocity.z),
 					ValueObjects::Vector3(item->pawn->Acceleration.x, item->pawn->Acceleration.y, item->pawn->Acceleration.z)
-				),
+				);
+			} else {
+				// Fallback: position from server packet (SpawnItem/DropItem)
+				// This is how Walker gets drop positions — from the packet, not from memory.
+				// Safer than reading memory, and works even when pawn is null.
+				L2::FVector packetPos;
+				if (L2::DropPositionCache::Instance().Retrieve(item->objectId, packetPos)) {
+					transform = ValueObjects::Transform(
+						ValueObjects::Vector3(packetPos.x, packetPos.y, packetPos.z),
+						ValueObjects::Vector3(0, 0, 0),
+						ValueObjects::Vector3(0, 0, 0),
+						ValueObjects::Vector3(0, 0, 0)
+					);
+				} else {
+					// No position available at all — skip this tick
+					throw RuntimeException(std::format(L"drop {} has no pawn and no packet position", item->objectId));
+				}
+			}
+
+			return {
+				item->objectId,
+				transform,
 				item->itemId,
 				item->amount,
 				nameEntry ? std::wstring(nameEntry->value) : L"",

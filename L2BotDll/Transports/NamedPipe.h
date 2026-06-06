@@ -33,6 +33,17 @@
 
 	const bool Connect(const std::wstring& pipeName)
 	{
+		auto dbg = [](const char* msg) {
+			FILE* f = nullptr;
+			errno_t e = _wfopen_s(&f, L"E:\\L2Teon\\system\\pipe_debug.log", L"a");
+			if (e == 0 && f) { fprintf(f, "%s", msg); fflush(f); fclose(f); }
+		};
+
+		char buf[512];
+		sprintf_s(buf, "[Connect] Creating pipe: %ls\n", pipeName.c_str());
+		dbg(buf);
+
+		// Close existing pipe if any
 		if (m_Pipe != NULL)
 		{
 			FlushFileBuffers(m_Pipe);
@@ -53,8 +64,14 @@
 
 		if (m_Pipe == INVALID_HANDLE_VALUE)
 		{
-			throw CriticalRuntimeException(L"cannot create the pipe " + pipeName + L": " + std::to_wstring(GetLastError()));
+			DWORD err = GetLastError();
+			sprintf_s(buf, "[Connect] CreateNamedPipe FAILED: err=%d\n", err);
+			dbg(buf);
+			throw CriticalRuntimeException(L"cannot create the pipe " + pipeName + L": " + std::to_wstring(err));
 		}
+
+		sprintf_s(buf, "[Connect] Pipe created OK handle=0x%p, calling ConnectNamedPipe...\n", m_Pipe);
+		dbg(buf);
 
 		m_PipeName = pipeName;
 
@@ -62,6 +79,7 @@
 		OVERLAPPED ol = {};
 		ol.hEvent = CreateEvent(NULL, TRUE, FALSE, NULL);
 		if (ol.hEvent == NULL) {
+			dbg("[Connect] CreateEvent FAILED\n");
 			throw CriticalRuntimeException(L"cannot create connect event");
 		}
 
@@ -69,17 +87,23 @@
 		if (!connected) {
 			DWORD err = GetLastError();
 			if (err == ERROR_IO_PENDING) {
+				dbg("[Connect] ConnectNamedPipe pending, waiting for client...\n");
 				// Wait for client connection (blocking in Connect thread)
 				WaitForSingleObject(ol.hEvent, INFINITE);
 				DWORD bytesTransferred = 0;
 				GetOverlappedResult(m_Pipe, &ol, &bytesTransferred, FALSE);
 			} else if (err != ERROR_PIPE_CONNECTED) {
+				sprintf_s(buf, "[Connect] ConnectNamedPipe FAILED: err=%d\n", err);
+				dbg(buf);
 				CloseHandle(ol.hEvent);
 				m_Connected = false;
 				throw CriticalRuntimeException(L"cannot connect the pipe " + m_PipeName + L": " + std::to_wstring(err));
 			}
 		}
 		CloseHandle(ol.hEvent);
+
+		sprintf_s(buf, "[Connect] Client connected! Pipe=%ls handle=0x%p\n", pipeName.c_str(), m_Pipe);
+		dbg(buf);
 
 		m_Connected = true;
 		return true;

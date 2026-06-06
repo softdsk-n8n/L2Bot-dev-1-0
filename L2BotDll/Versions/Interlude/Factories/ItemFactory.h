@@ -93,7 +93,20 @@ namespace Interlude
 			//FIXME during first start data may be undefined
 			const auto data = GetItemData(itemInfo.itemId);
 			if (!data) {
-				return nullptr;
+				// GetItemData returns null when _target not captured yet.
+				// Create a minimal EtcItem so inventory/drops still work — 
+				// name/icon will be empty but objectId+itemId are valid.
+				return std::make_shared<Entities::EtcItem>(
+					itemInfo.objectId,
+					itemInfo.itemId,
+					0,      // mana
+					L"",    // name
+					L"",    // iconName
+					L"",    // description
+					0,      // weight
+					itemInfo.amount,
+					false   // isQuest
+				);
 			}
 			
 			switch (data->dataType)
@@ -112,6 +125,11 @@ namespace Interlude
 			//FIXME during first start data may be undefined
 			const auto data = GetItemData(itemInfo.itemId);
 			if (!data) {
+				// Can't update type-specific info without ItemData, but update basic fields
+				auto etcItem = std::dynamic_pointer_cast<Entities::EtcItem>(item);
+				if (etcItem) {
+					etcItem->Update(itemInfo.itemId, 0, L"", L"", L"", 0, itemInfo.amount, false);
+				}
 				return;
 			}
 			

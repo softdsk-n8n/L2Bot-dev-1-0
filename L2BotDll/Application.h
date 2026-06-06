@@ -15,6 +15,9 @@
 #include "Logger/ChatLogChannel.h"
 #include "Logger/FileLogChannel.h"
 #include "Logger/OutputDebugLogChannel.h"
+#include "Versions/Interlude/Services/HeroService.h"
+#include "Versions/Interlude/GameStructs/NetworkHandlerWrapper.h"
+#include "Versions/Interlude/GameStructs/GameStructs.h"
 
 using namespace L2Bot::Domain;
 

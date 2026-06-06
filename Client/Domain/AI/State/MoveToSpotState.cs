@@ -17,7 +17,8 @@ namespace Client.Domain.AI.State
 
         protected override void DoOnEnter(WorldHandler worldHandler, Config config, Hero hero)
         {
-            worldHandler.RequestAcquireTarget(hero.Id);
+            // Do NOT target hero — MoveToSpot just walks to zone center.
+            // Previously called RequestAcquireTarget(hero.Id) which made bot target itself.
         }
 
         protected override void DoExecute(WorldHandler worldHandler, Config config, AsyncPathMoverInterface asyncPathMover, Hero hero)

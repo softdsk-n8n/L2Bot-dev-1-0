@@ -284,6 +284,13 @@ namespace Interlude
 
 	float __fastcall GameEngineWrapper::__GetMaxTickRate_hook(GameEngine* This, int)
 	{
+		static int hookCallCount = 0;
+		if (++hookCallCount <= 3) {
+			FILE* f = nullptr;
+			errno_t err = _wfopen_s(&f, L"E:\\L2Teon\\system\\dll_debug.log", L"a");
+			if (err == 0 && f) { fprintf(f, "[GetMaxTickRate] hook called count=%d This=0x%p\n", hookCallCount, This); fflush(f); fclose(f); }
+		}
+
 		if (_target == 0)
 		{
 			_target = This;

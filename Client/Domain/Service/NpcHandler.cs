@@ -16,7 +16,22 @@ namespace Client.Domain.Service
         {
             entity.Level = npcInfoHelper.GetLevel(entity.NpcId);
             entity.AggroRadius = npcInfoHelper.GetAggroRadius(entity.NpcId);
+            // Teon fix: DLL-side isMob/IsMonster() both broken (always return 0/false).
+            // Use npcInfo.json AggroRadius to determine hostility instead.
+            if (entity.AggroRadius > 0 || npcInfoHelper.IsGuard(entity.NpcId))
+            {
+                entity.IsHostile = true;
+            }
             eventBus.Publish(new CreatureCreatedEvent(entity));
+        }
+
+        public override void OnUpdate(NPC entity)
+        {
+            // Re-apply IsHostile override after DLL data overwrites it via PopulateObject
+            if (entity.AggroRadius > 0 || npcInfoHelper.IsGuard(entity.NpcId))
+            {
+                entity.IsHostile = true;
+            }
         }
         public override void OnDelete(NPC entity)
         {

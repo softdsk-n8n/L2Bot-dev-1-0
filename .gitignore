@@ -364,3 +364,5 @@ FodyWeavers.xsd
 
 # Game client DLLs (proprietary, for reference/analysis only)
 reference/
+# Geodata files (529MB+ binary blobs)
+Client/Assets/geodata/

@@ -33,6 +33,17 @@ namespace Client.Infrastructure.Helpers
             return 0;
         }
 
+        public bool IsGuard(uint id)
+        {
+            LoadNpc();
+
+            if (npcInfo.ContainsKey(id))
+            {
+                return npcInfo[id].IsGuard;
+            }
+            return false;
+        }
+
         public List<NpcInfo> GetAllNpc()
         {
             LoadNpc();

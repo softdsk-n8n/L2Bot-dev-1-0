@@ -31,8 +31,10 @@ namespace Client.Domain.AI
             IsEnabled = !IsEnabled;
             if (IsEnabled)
             {
-                // Auto-set combat zone center to hero position if zone center is at origin (0,0,0)
-                if (worldHandler.Hero != null && config.Combat.Zone.Center.X == 0 && config.Combat.Zone.Center.Y == 0)
+                // Always set combat zone center to hero position when toggling AI on.
+                // This ensures the bot fights where the player is standing,
+                // preventing the bot from running to (0,0,0) which is not a valid L2 coordinate.
+                if (worldHandler.Hero != null)
                 {
                     config.Combat.Zone.Center = worldHandler.Hero.Transform.Position;
                 }

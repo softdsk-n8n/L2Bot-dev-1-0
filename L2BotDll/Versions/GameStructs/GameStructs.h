@@ -1,6 +1,8 @@
 #pragma once
 
 #include "pch.h"
+#include <mutex>
+#include <unordered_map>
 
 namespace L2
 {
@@ -186,6 +188,63 @@ namespace L2
 
 	enum class NetworkPacketId
 	{
-		SYSTEM_MESSAGE = 0x64
+		SYSTEM_MESSAGE = 0x64,
+		SPAWN_ITEM = 0x0B,
+		DROP_ITEM = 0x0C,
+		DELETE_OBJECT = 0x08
+	};
+
+	// Global drop position storage: objectId → FVector
+	// Populated from SpawnItem/DropItem server packets, used by DropFactory
+	// when pawn is null. Thread-safe via mutex.
+	class DropPositionCache
+	{
+	public:
+		static DropPositionCache& Instance()
+		{
+			static DropPositionCache instance;
+			return instance;
+		}
+
+		void Store(uint32_t objectId, const FVector& pos)
+		{
+			std::lock_guard<std::mutex> lock(m_Mutex);
+			m_Positions[objectId] = pos;
+		}
+
+		bool Retrieve(uint32_t objectId, FVector& outPos)
+		{
+			std::lock_guard<std::mutex> lock(m_Mutex);
+			auto it = m_Positions.find(objectId);
+			if (it != m_Positions.end()) {
+				outPos = it->second;
+				return true;
+			}
+			return false;
+		}
+
+		void Remove(uint32_t objectId)
+		{
+			std::lock_guard<std::mutex> lock(m_Mutex);
+			m_Positions.erase(objectId);
+		}
+
+		size_t Size()
+		{
+			std::lock_guard<std::mutex> lock(m_Mutex);
+			return m_Positions.size();
+		}
+
+		// Get snapshot of all entries (thread-safe copy)
+		std::unordered_map<uint32_t, FVector> GetAllEntries()
+		{
+			std::lock_guard<std::mutex> lock(m_Mutex);
+			return m_Positions;
+		}
+
+	private:
+		DropPositionCache() = default;
+		std::mutex m_Mutex;
+		std::unordered_map<uint32_t, FVector> m_Positions;
 	};
 }

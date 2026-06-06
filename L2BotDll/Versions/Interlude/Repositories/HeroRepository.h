@@ -34,6 +34,11 @@ namespace Interlude
 
 			static int tickCounter = 0;
 			++tickCounter;
+			if (tickCounter <= 3 || tickCounter % 200 == 0) {
+				FILE* f = nullptr;
+				errno_t err = _wfopen_s(&f, L"E:\\L2Teon\\system\\dll_debug.log", L"a");
+				if (err == 0 && f) { fprintf(f, "[HeroRepo] tick=%d hero=%p m_Hero=%p\n", tickCounter, hero, m_Hero ? m_Hero.get() : nullptr); fflush(f); fclose(f); }
+			}
 
 			std::unordered_map<std::uint32_t, std::shared_ptr<Entities::EntityInterface>> result;
 			if (hero) {

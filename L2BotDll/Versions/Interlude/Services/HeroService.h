@@ -91,14 +91,16 @@ namespace Interlude
 
 		void Pickup(int objectId) const override
 		{
-			auto target = m_NetworkHandler.GetItem(objectId);
-
-			if (target && target->pawn) {
-				L2::FVector loc = target->pawn->Location;
+			// Walker-style pickup: Action packet sends HERO position, not drop position.
+			// Server validates "is hero close enough to drop" using the origin coords.
+			// Sending drop position is detectable as packet anomaly.
+			auto hero = m_NetworkHandler.GetHero();
+			if (hero && hero->pawn) {
+				L2::FVector heroLoc = hero->pawn->Location;
 				auto& nh = m_NetworkHandler;
 				std::lock_guard<std::mutex> lock(g_CommandMutex);
-				g_CommandQueue.push_back([&nh, objectId, loc]() {
-					nh.Action(objectId, loc, 0);
+				g_CommandQueue.push_back([&nh, objectId, heroLoc]() {
+					nh.Action(objectId, heroLoc, 0);
 				});
 			}
 		}

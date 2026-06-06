@@ -27,6 +27,21 @@ namespace L2Bot::Domain::Services
 			std::vector <std::vector<Serializers::Node>> result;
 
 			const auto& states = GetStates(name, entities);
+			
+			// Diagnostic: log when entities exist but no states generated (normal after initial dump)
+			if (entities.size() > 0 && states.size() == 0) {
+				static int diagCount = 0;
+				if (++diagCount <= 3) {
+					FILE* f = nullptr;
+					errno_t err = _wfopen_s(&f, L"E:\\L2Teon\\system\\bot_status.log", L"a");
+					if (err == 0 && f) {
+						fwprintf(f, L"[BUILDER] repo=%s entities=%d states=0 hashEntries=%d (normal after initial dump)\n",
+							name.c_str(), (int)entities.size(), (int)m_Hashes[name].size());
+						fflush(f); fclose(f);
+					}
+				}
+			}
+			
 			for (const auto& kvp : states) {
 				const auto id = kvp.first;
 

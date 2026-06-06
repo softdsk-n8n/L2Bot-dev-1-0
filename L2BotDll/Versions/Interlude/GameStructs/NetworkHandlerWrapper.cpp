@@ -302,13 +302,103 @@ namespace Interlude
 			_target = This;
 		}
 
-		if (packet->id == static_cast<int>(L2::NetworkPacketId::SYSTEM_MESSAGE)) {
-			L2::SystemMessagePacket* p = static_cast<L2::SystemMessagePacket*>(packet);
-			if (
-				p->GetMessageId() == static_cast<int>(L2::SystemMessagePacket::Type::SPOIL_SUCCESS) ||
-				p->GetMessageId() == static_cast<int>(L2::SystemMessagePacket::Type::ALREADY_SPOILED)
-				) {
-				Services::ServiceLocator::GetInstance().GetEventDispatcher()->Enqueue(Events::SpoiledEvent{});
+		if (packet && packet->data && packet->size > 0) {
+			// Parse SpawnItem (0x0B) and DropItem (0x0C) for drop positions
+			// This gives us XYZ from server packets — no dependency on pawn->Location
+			if (packet->id == static_cast<int>(L2::NetworkPacketId::SPAWN_ITEM)) {
+				// Dump raw bytes for diagnosis — structure unknown, need to reverse-engineer
+				{
+					FILE* f = nullptr;
+					errno_t err = _wfopen_s(&f, L"E:\\L2Teon\\system\\drop_debug.log", L"a");
+					if (err == 0 && f) {
+						fprintf(f, "[SPAWN_ITEM] size=%d raw=", packet->size);
+						for (int i = 0; i < packet->size && i < 48; i++) {
+							fprintf(f, "%02X ", (unsigned char)packet->data[i]);
+						}
+						fprintf(f, "\n");
+						fflush(f); fclose(f);
+					}
+				}
+				// Try multiple possible structures for Interlude SpawnItem:
+				// L2J structure: [objectId(4)] [itemId(4)] [x(4)] [y(4)] [z(4)] [stackable(1)] [count(4/8)]
+				// Some interlude: [objectId(4)] [itemId(4)] [x(4)] [y(4)] [z(4)] [stackable(4)] [count(4)]
+				if (packet->size >= 21) {
+					uint32_t objectId = *(uint32_t*)(packet->data + 0);
+					uint32_t itemId = *(uint32_t*)(packet->data + 4);
+					int32_t x = *(int32_t*)(packet->data + 8);
+					int32_t y = *(int32_t*)(packet->data + 12);
+					int32_t z = *(int32_t*)(packet->data + 16);
+					// Log both interpretations
+					FILE* f = nullptr;
+					errno_t err = _wfopen_s(&f, L"E:\\L2Teon\\system\\drop_debug.log", L"a");
+					if (err == 0 && f) {
+						fprintf(f, "[SPAWN_ITEM] objId=%u itemId=%u x=%d y=%d z=%d\n",
+							objectId, itemId, x, y, z);
+						fflush(f); fclose(f);
+					}
+					if (x != 0 || y != 0 || z != 0) {
+						L2::DropPositionCache::Instance().Store(objectId, L2::FVector{
+							static_cast<float>(x),
+							static_cast<float>(y),
+							static_cast<float>(z)
+						});
+					}
+				}
+			}
+			else if (packet->id == static_cast<int>(L2::NetworkPacketId::DROP_ITEM)) {
+				// Dump raw bytes for DropItem diagnosis
+				{
+					FILE* f = nullptr;
+					errno_t err = _wfopen_s(&f, L"E:\\L2Teon\\system\\drop_debug.log", L"a");
+					if (err == 0 && f) {
+						fprintf(f, "[DROP_ITEM] size=%d raw=", packet->size);
+						for (int i = 0; i < packet->size && i < 48; i++) {
+							fprintf(f, "%02X ", (unsigned char)packet->data[i]);
+						}
+						fprintf(f, "\n");
+						fflush(f); fclose(f);
+					}
+				}
+				// DropItem: [playerId(4)] [objectId(4)] [itemId(4)] [x(4)] [y(4)] [z(4)] [stackable(4)] [count(4)]
+				if (packet->size >= 28) {
+					uint32_t playerId = *(uint32_t*)(packet->data + 0);
+					uint32_t objectId = *(uint32_t*)(packet->data + 4);
+					uint32_t itemId = *(uint32_t*)(packet->data + 8);
+					int32_t x = *(int32_t*)(packet->data + 12);
+					int32_t y = *(int32_t*)(packet->data + 16);
+					int32_t z = *(int32_t*)(packet->data + 20);
+					FILE* f = nullptr;
+					errno_t err = _wfopen_s(&f, L"E:\\L2Teon\\system\\drop_debug.log", L"a");
+					if (err == 0 && f) {
+						fprintf(f, "[DROP_ITEM] playerId=%u objId=%u itemId=%u x=%d y=%d z=%d\n",
+							playerId, objectId, itemId, x, y, z);
+						fflush(f); fclose(f);
+					}
+					if (x != 0 || y != 0 || z != 0) {
+						L2::DropPositionCache::Instance().Store(objectId, L2::FVector{
+							static_cast<float>(x),
+							static_cast<float>(y),
+							static_cast<float>(z)
+						});
+					}
+				}
+			}
+			else if (packet->id == static_cast<int>(L2::NetworkPacketId::DELETE_OBJECT)) {
+				// DeleteObject: [objectId(4)] — remove from cache
+				if (packet->size >= 4) {
+					uint32_t objectId = *(uint32_t*)(packet->data + 0);
+					L2::DropPositionCache::Instance().Remove(objectId);
+				}
+			}
+
+			if (packet->id == static_cast<int>(L2::NetworkPacketId::SYSTEM_MESSAGE)) {
+				L2::SystemMessagePacket* p = static_cast<L2::SystemMessagePacket*>(packet);
+				if (
+					p->GetMessageId() == static_cast<int>(L2::SystemMessagePacket::Type::SPOIL_SUCCESS) ||
+					p->GetMessageId() == static_cast<int>(L2::SystemMessagePacket::Type::ALREADY_SPOILED)
+					) {
+					Services::ServiceLocator::GetInstance().GetEventDispatcher()->Enqueue(Events::SpoiledEvent{});
+				}
 			}
 		}
 
