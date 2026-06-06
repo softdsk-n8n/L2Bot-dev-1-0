@@ -12,28 +12,6 @@ static bool g_isLineageProcess = false;
 
 void ConfigLogger(HMODULE hModule);
 
-// Temp debug: log to E:\L2Teon\system\dll_debug.log
-static void DllDbg(const char* msg)
-{
-	FILE* f = nullptr;
-	errno_t err = _wfopen_s(&f, L"E:\\L2Teon\\system\\dll_debug.log", L"a");
-	if (err == 0 && f) {
-		fprintf(f, "%s\n", msg);
-		fflush(f);
-		fclose(f);
-	}
-}
-
-static void DllDbgFmt(const char* fmt, ...)
-{
-	char buf[512];
-	va_list args;
-	va_start(args, fmt);
-	vsnprintf_s(buf, sizeof(buf), _TRUNCATE, fmt, args);
-	va_end(args);
-	DllDbg(buf);
-}
-
 // Run heavy initialization on a separate thread to avoid loader lock deadlock.
 // DllMain is called inside the loader lock — we MUST NOT create threads,
 // wait on objects, or create named pipes inside it.
@@ -47,18 +25,14 @@ DWORD WINAPI InitThreadProc(LPVOID lpParam)
 	const int processId = GetCurrentProcessId();
 	const std::string& processName = InjectLibrary::GetCurrentProcessName();
 	const bool isLineage = processName == "l2.exe" || processName == "l2.bin" || processName == "L2.exe" || processName == "L2.bin" || GetModuleHandleW(L"Engine.dll") != NULL;
-	DllDbgFmt("[Init] processName='%s' pid=%d isLineage=%d Engine=0x%p", processName.c_str(), processId, isLineage, GetModuleHandleW(L"Engine.dll"));
 
 	ConfigLogger(hModule);
 
 	InjectLibrary::StopCurrentProcess();
-	DllDbg("[Init] StopCurrentProcess done");
 
 	application.Start();
-	DllDbg("[Init] application.Start() done");
 
 	InjectLibrary::StartCurrentProcess();
-	DllDbg("[Init] StartCurrentProcess done");
 
 	return 0;
 }
@@ -106,14 +80,10 @@ BOOL APIENTRY DllMain(HMODULE hModule,
 	switch (ul_reason_for_call)
 	{
 	case DLL_PROCESS_ATTACH:
-		DllDbgFmt("[DllMain] ATTACH processName='%s' isLineage=%d Engine=0x%p", processName.c_str(), isLineageProcess, GetModuleHandleW(L"Engine.dll"));
 		injector.SetHook(hModule);
 		if (isLineageProcess) {
 			g_isLineageProcess = true;
 			g_hInitThread = CreateThread(NULL, 0, InitThreadProc, hModule, 0, NULL);
-			DllDbgFmt("[DllMain] InitThread created handle=0x%p", g_hInitThread);
-		} else {
-			DllDbg("[DllMain] NOT a Lineage process - skipping init");
 		}
 		break;
 	case DLL_PROCESS_DETACH:
