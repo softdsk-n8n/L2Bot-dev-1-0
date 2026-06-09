@@ -40,7 +40,14 @@ namespace Client.Domain.AI.Combat
                             return false;
                         }
 
-                        return worldHandler.Hero.AttackerIds.Count > 0;
+                        // Proactively find targets: if being attacked OR if there are mobs in range to attack
+                        if (worldHandler.Hero.AttackerIds.Count > 0)
+                        {
+                            return true;
+                        }
+
+                        // Also transition to FindTarget if there are mobs to attack (proactive farming)
+                        return Helper.GetMobsToAttackByConfig(worldHandler, config, worldHandler.Hero).Count > 0;
                     }),
                     new(new List<BaseState.Type>{BaseState.Type.FindTarget}, BaseState.Type.MoveToTarget, (state) => {
                         if (worldHandler.Hero == null) {

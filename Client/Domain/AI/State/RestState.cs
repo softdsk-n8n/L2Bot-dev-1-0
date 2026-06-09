@@ -16,7 +16,9 @@ namespace Client.Domain.AI.State
 
         protected override void DoOnEnter(WorldHandler worldHandler, Config config, Hero hero)
         {
-            worldHandler.RequestAcquireTarget(hero.Id);
+            // Do NOT call RequestAcquireTarget(hero.Id) — targeting yourself while sitting
+            // is unnecessary and causes the bot to appear to "target itself" in the UI.
+            // The game does not require an explicit target to sit and rest.
         }
 
         protected override void DoExecute(WorldHandler worldHandler, Config config, AsyncPathMoverInterface asyncPathMover, Hero hero)

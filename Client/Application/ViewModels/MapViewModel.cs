@@ -9,6 +9,7 @@ using System;
 using System.Collections.Generic;
 using System.Collections.ObjectModel;
 using System.Collections.Specialized;
+using System.Diagnostics;
 using System.Threading.Tasks;
 using System.Windows;
 using System.Windows.Data;
@@ -162,14 +163,29 @@ namespace Client.Application.ViewModels
                 return;
             }
 
-            Point mousePos = Mouse.GetPosition((IInputElement)obj);
-            var location = new Vector3(
-                (float)(mousePos.X - ViewportWidth / 2) * scale + hero.Transform.Position.X,
-                (float)(mousePos.Y - ViewportHeight / 2) * scale + hero.Transform.Position.Y,
-                hero.Transform.Position.Z
-            );
+            // Guard: prevent crash when pathMover is null or locked (already pathing)
+            if (pathMover == null)
+            {
+                Debug.WriteLine("MapViewModel.OnLeftMouseClick: pathMover is null");
+                return;
+            }
 
-            await pathMover.MoveAsync(location);
+            try
+            {
+                Point mousePos = Mouse.GetPosition((IInputElement)obj);
+                var location = new Vector3(
+                    (float)(mousePos.X - ViewportWidth / 2) * scale + hero.Transform.Position.X,
+                    (float)(mousePos.Y - ViewportHeight / 2) * scale + hero.Transform.Position.Y,
+                    hero.Transform.Position.Z
+                );
+
+                await pathMover.MoveAsync(location);
+            }
+            catch (Exception ex)
+            {
+                Debug.WriteLine($"MapViewModel.OnLeftMouseClick exception: {ex.GetType().Name}: {ex.Message}");
+                // Silently absorb exceptions to prevent the Client from crashing on click
+            }
         }
 
         public void OnMouseWheel(object sender, MouseWheelEventArgs e)
