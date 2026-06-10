@@ -34,7 +34,7 @@ namespace Client.Domain.AI.State
             }
 
             var distance = hero.Transform.Position.HorizontalDistance(target.Transform.Position);
-            if (routeNeedsToBeAdjusted || distance >= Helper.GetAttackDistanceByConfig(worldHandler, config, hero, target) || !asyncPathMover.Pathfinder.HasLineOfSight(hero.Transform.Position, target.Transform.Position))
+            if (routeNeedsToBeAdjusted || distance > Helper.GetAttackDistanceByConfig(worldHandler, config, hero, target) || !asyncPathMover.Pathfinder.HasLineOfSight(hero.Transform.Position, target.Transform.Position))
             {
                 targetPosition = target.Transform.Position.Clone() as Vector3;
                 asyncPathMover.MoveAsync(target.Transform.Position, config.Combat.MaxPassableHeight);
