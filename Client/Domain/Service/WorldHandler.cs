@@ -266,8 +266,25 @@ namespace Client.Domain.Service
 
         public List<EtcItem> GetShotItems()
         {
-            var shotIds = itemInfoHelper.GetAllItems()
+            return GetShotItems(Enums.CrystalTypeEnum.None);
+        }
+
+        public List<EtcItem> GetShotItems(Enums.CrystalTypeEnum weaponGrade)
+        {
+            var shotItems = itemInfoHelper.GetAllItems()
                 .Where(x => x.IsShot)
+                .ToList();
+
+            // If weapon grade is known, filter shot by matching grade
+            if (weaponGrade != Enums.CrystalTypeEnum.None)
+            {
+                var gradeStr = weaponGrade.ToString(); // e.g., "D", "C", "B", "A", "S"
+                shotItems = shotItems
+                    .Where(x => x.Name.Contains(gradeStr) || x.Name.Contains("Grade " + gradeStr))
+                    .ToList();
+            }
+
+            var shotIds = shotItems
                 .Select(x => x.Id)
                 .ToDictionary(x => x, x => x);
 

@@ -34,7 +34,8 @@ namespace Client.Domain.AI
                 // Always set combat zone center to hero position when toggling AI on.
                 // This ensures the bot fights where the player is standing,
                 // preventing the bot from running to (0,0,0) which is not a valid L2 coordinate.
-                if (worldHandler.Hero != null)
+                if (worldHandler.Hero != null && worldHandler.Hero.Transform != null &&
+                    !worldHandler.Hero.Transform.Position.Equals(Vector3.Zero))
                 {
                     config.Combat.Zone.Center = worldHandler.Hero.Transform.Position;
                 }
