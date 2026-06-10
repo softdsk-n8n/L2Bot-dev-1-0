@@ -14,16 +14,20 @@ namespace Client.Domain.AI.Combat
         public static Skill? GetSkillByConfig(WorldHandler worldHandler, Config config, Hero hero, CreatureInterface target)
         {
             var conditions = config.Combat.SkillConditions;
-            var targetHp = target.VitalStats.HpPercent;
-            var heroMp = hero.VitalStats.MpPercent;
-            var heroHp = hero.VitalStats.HpPercent;
+            var targetHp = target.VitalStats?.HpPercent;
+            var heroMp = hero.VitalStats?.MpPercent;
+            var heroHp = hero.VitalStats?.HpPercent;
 
             foreach (var condition in conditions )
             {
                 var skill = worldHandler.GetSkillById(condition.Id);
                 if (skill != null)
                 {
-                    if (condition.MaxTargetPercentHp < targetHp || condition.MinPlayerPercentMp > heroMp || condition.MaxPlayerPercentHp < heroHp)
+                    if (
+                        (targetHp.HasValue && condition.MaxTargetPercentHp < targetHp.Value) ||
+                        (heroMp.HasValue && condition.MinPlayerPercentMp > heroMp.Value) ||
+                        (heroHp.HasValue && condition.MaxPlayerPercentHp < heroHp.Value)
+                    )
                     {
                         continue;
                     }
